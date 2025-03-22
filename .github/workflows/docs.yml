@@ -1,0 +1,30 @@
+name: build and deploy gh-pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-20.04
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Build docs
+        uses: peaceiris/actions-mdbook@v2
+        with:
+          mdbook-version: "0.4.10"
+      - run: |
+          mdbook build
+        working-directory: ./docs
+
+      - name: Deploy gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        if: ${{ github.ref == 'refs/heads/main' }}
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./docs/book
