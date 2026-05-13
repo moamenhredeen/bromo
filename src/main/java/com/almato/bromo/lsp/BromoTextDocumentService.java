@@ -118,7 +118,7 @@ public final class BromoTextDocumentService implements TextDocumentService {
             CharSequence content = contentOf(uri);
             if (content == null) return null;
             int offset = Adapters.offset(content, params.getPosition());
-            var feature = new HoverFeature(ecj, workspace.files(), sources);
+            var feature = new HoverFeature(ecj, workspace.files(), sources, workspace.symbols());
             return feature.hover(uri, offset, CancelToken.never())
                     .map(r -> Adapters.toLspHover(r, content))
                     .orElse(null);

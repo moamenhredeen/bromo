@@ -37,7 +37,7 @@ final class HoverFeatureTest {
 
         var files = new FileStore();
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp), new com.almato.bromo.symbol.SymbolIndex());
 
         int offset = source.indexOf("Foo other") + "F".length() - 1;
         var result = hover.hover(file.toUri(), offset, CancelToken.never());
@@ -62,7 +62,7 @@ final class HoverFeatureTest {
         var files = new FileStore();
         // Empty classpath is enough — JDK is auto-discovered via jrt-fs in parseWithBindings.
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp), new com.almato.bromo.symbol.SymbolIndex());
 
         int offset = source.indexOf("String");
         var result = hover.hover(file.toUri(), offset, CancelToken.never());
@@ -87,13 +87,51 @@ final class HoverFeatureTest {
 
         var files = new FileStore();
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp), new com.almato.bromo.symbol.SymbolIndex());
 
         int offset = source.indexOf("doubled(21)");
         var result = hover.hover(file.toUri(), offset, CancelToken.never());
         assertTrue(result.isPresent(), "expected hover");
         assertTrue(result.get().markdown().contains("doubled"),
                 "expected method name in hover; got " + result.get().markdown());
+    }
+
+    @Test
+    @DisplayName("hover on cross-file workspace type pulls javadoc from the declaring file")
+    void hoverOnCrossFileWorkspaceJavadoc(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        var helper = src.resolve("Helper.java");
+        var user = src.resolve("User.java");
+        Files.writeString(helper, """
+                package example;
+
+                /// Helper utility for arithmetic.
+                ///
+                /// Used by [User].
+                public class Helper {
+                    public static int doubled(int x) { return x * 2; }
+                }
+                """, StandardCharsets.UTF_8);
+        var userSrc = """
+                package example;
+                public class User {
+                    public int run() { return Helper.doubled(21); }
+                }
+                """;
+        Files.writeString(user, userSrc, StandardCharsets.UTF_8);
+
+        var files = new FileStore();
+        var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
+        var symbols = new com.almato.bromo.symbol.WorkspaceScanner()
+                .scan(List.of(tmp.resolve("src/main/java"))).index();
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp), symbols);
+
+        int offset = userSrc.indexOf("Helper.doubled");
+        var result = hover.hover(user.toUri(), offset, CancelToken.never());
+        assertTrue(result.isPresent(), "expected hover");
+        var md = result.get().markdown();
+        assertTrue(md.contains("Helper utility for arithmetic."),
+                "expected cross-file javadoc body in hover; got:\n" + md);
     }
 
     @Test
@@ -115,7 +153,7 @@ final class HoverFeatureTest {
 
         var files = new FileStore();
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp), new com.almato.bromo.symbol.SymbolIndex());
 
         int offset = source.indexOf("Doodad other");
         var result = hover.hover(file.toUri(), offset, CancelToken.never());
@@ -145,7 +183,7 @@ final class HoverFeatureTest {
 
         var files = new FileStore();
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp), new com.almato.bromo.symbol.SymbolIndex());
 
         int offset = source.indexOf("String");
         var result = hover.hover(file.toUri(), offset, CancelToken.never());

@@ -3,6 +3,9 @@ package com.almato.bromo.features;
 import com.almato.bromo.compiler.EcjContext;
 import com.almato.bromo.compiler.ResolvedDeclaration;
 import com.almato.bromo.compiler.SourceResolver;
+import com.almato.bromo.symbol.Descriptor;
+import com.almato.bromo.symbol.SymbolIndex;
+import com.almato.bromo.symbol.SymbolKind;
 import com.almato.bromo.util.CancelToken;
 import com.almato.bromo.workspace.FileStore;
 import java.io.IOException;
@@ -42,11 +45,13 @@ public final class HoverFeature {
     private final EcjContext ecj;
     private final FileStore files;
     private final SourceResolver sources;
+    private final SymbolIndex symbols;
 
-    public HoverFeature(EcjContext ecj, FileStore files, SourceResolver sources) {
+    public HoverFeature(EcjContext ecj, FileStore files, SourceResolver sources, SymbolIndex symbols) {
         this.ecj = ecj;
         this.files = files;
         this.sources = sources;
+        this.symbols = symbols;
     }
 
     public Optional<HoverResult> hover(URI uri, int offset, CancelToken cancel) {
@@ -66,17 +71,27 @@ public final class HoverFeature {
 
         String markdown = render(binding, cu, content);
 
-        // If the binding points outside the current CU and the signature
-        // doesn't already carry its javadoc, try to pull it from the source
-        // attachment (JDK src.zip or library -sources.jar). Without this we
-        // only ever render docs for in-workspace declarations.
+        // If the declaration isn't in this CU, the signature renders fine but
+        // its doc was never pulled. Two ways the binding can resolve:
+        //
+        //   1. Binary binding (JDK or library) — `SourceResolver` materialises
+        //      the attached source and we walk to the body declaration.
+        //   2. Cross-file workspace binding — look it up via `SymbolIndex` and
+        //      parse the declaring file directly.
+        //
+        // jdtls and IntelliJ both follow this "two-stage source attachment"
+        // pattern; without it cross-file workspace types render their
+        // signature without their doc body, which is the gap users hit first.
         if (cu.findDeclaringNode(binding) == null) {
+            String doc = "";
             var attached = sources.resolveDeclaration(binding);
             if (attached.isPresent()) {
-                String doc = extractDocFromAttachment(attached.get());
-                if (!doc.isBlank()) {
-                    markdown = markdown + "\n\n" + doc;
-                }
+                doc = extractDocFromAttachment(attached.get());
+            } else {
+                doc = lookupCrossFileWorkspaceDoc(binding);
+            }
+            if (!doc.isBlank()) {
+                markdown = markdown + "\n\n" + doc;
             }
         }
 
@@ -98,6 +113,102 @@ public final class HoverFeature {
             current = current.getParent();
         }
         return (BodyDeclaration) current;
+    }
+
+    /// Pulls javadoc for a cross-file workspace binding by re-parsing the
+    /// declaring file located through [SymbolIndex]. Returns an empty
+    /// string if no match, no doc, or read/parse failure.
+    private String lookupCrossFileWorkspaceDoc(IBinding binding) {
+        ITypeBinding owning = owningType(binding);
+        if (owning == null) return "";
+
+        String simpleName = owning.getName();
+        if (simpleName == null || simpleName.isEmpty()) return "";
+
+        Descriptor typeEntry = findTypeEntry(simpleName);
+        if (typeEntry == null) return "";
+
+        URI declaringUri = typeEntry.source().toUri();
+        char[] declaringContent = readContent(declaringUri).orElse(null);
+        if (declaringContent == null) return "";
+
+        CompilationUnit declaringCu = ecj.parseWithBindings(declaringUri, declaringContent);
+        if (declaringCu == null) return "";
+
+        BodyDeclaration target = findTargetBody(declaringCu, binding, simpleName);
+        if (target == null || target.getJavadoc() == null) return "";
+        return extractJavadoc(target.getJavadoc(), declaringContent);
+    }
+
+    private static ITypeBinding owningType(IBinding binding) {
+        return switch (binding) {
+            case ITypeBinding tb -> tb;
+            case IMethodBinding mb -> mb.getDeclaringClass();
+            case IVariableBinding vb -> vb.getDeclaringClass();
+            default -> null;
+        };
+    }
+
+    private Descriptor findTypeEntry(String simpleName) {
+        for (var d : symbols.findExact(simpleName)) {
+            if (d.kind() == SymbolKind.CLASS
+                    || d.kind() == SymbolKind.INTERFACE
+                    || d.kind() == SymbolKind.ENUM
+                    || d.kind() == SymbolKind.RECORD
+                    || d.kind() == SymbolKind.ANNOTATION) {
+                return d;
+            }
+        }
+        return null;
+    }
+
+    private static BodyDeclaration findTargetBody(CompilationUnit cu, IBinding binding, String enclosingTypeName) {
+        BodyDeclaration enclosingType = null;
+        for (Object t : cu.types()) {
+            if (t instanceof org.eclipse.jdt.core.dom.AbstractTypeDeclaration atd
+                    && atd.getName().getIdentifier().equals(enclosingTypeName)) {
+                enclosingType = atd;
+                break;
+            }
+        }
+        if (enclosingType == null) return null;
+
+        return switch (binding) {
+            case ITypeBinding _ -> enclosingType;
+            case IMethodBinding mb -> findMethodIn(enclosingType, mb);
+            case IVariableBinding vb -> findFieldIn(enclosingType, vb);
+            default -> enclosingType;
+        };
+    }
+
+    private static MethodDeclaration findMethodIn(BodyDeclaration enclosing, IMethodBinding mb) {
+        if (!(enclosing instanceof org.eclipse.jdt.core.dom.AbstractTypeDeclaration atd)) return null;
+        String want = mb.isConstructor() ? atd.getName().getIdentifier() : mb.getName();
+        int arity = mb.getParameterTypes().length;
+        for (Object body : atd.bodyDeclarations()) {
+            if (body instanceof MethodDeclaration md
+                    && md.getName().getIdentifier().equals(want)
+                    && md.parameters().size() == arity) {
+                return md;
+            }
+        }
+        return null;
+    }
+
+    private static BodyDeclaration findFieldIn(BodyDeclaration enclosing, IVariableBinding vb) {
+        if (!(enclosing instanceof org.eclipse.jdt.core.dom.AbstractTypeDeclaration atd)) return null;
+        String want = vb.getName();
+        for (Object body : atd.bodyDeclarations()) {
+            if (body instanceof org.eclipse.jdt.core.dom.FieldDeclaration fd) {
+                for (Object frag : fd.fragments()) {
+                    if (frag instanceof org.eclipse.jdt.core.dom.VariableDeclarationFragment vdf
+                            && vdf.getName().getIdentifier().equals(want)) {
+                        return fd;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private Optional<char[]> readContent(URI uri) {

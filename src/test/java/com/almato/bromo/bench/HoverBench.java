@@ -30,7 +30,8 @@ final class HoverBench {
         var sources = new SourceResolver(
                 new JdkProvider(root.resolve("target/bromo-cache/sources/jdk")),
                 new LibrarySourceProvider(model.classpath(), root.resolve("target/bromo-cache/sources/lib")));
-        var hover = new HoverFeature(ctx, files, sources);
+        var symbols = new com.almato.bromo.symbol.WorkspaceScanner().scan(model.sourceRoots()).index();
+        var hover = new HoverFeature(ctx, files, sources, symbols);
 
         var mainJava = root.resolve("src/main/java/com/almato/bromo/Main.java").toUri();
         // Warmup
