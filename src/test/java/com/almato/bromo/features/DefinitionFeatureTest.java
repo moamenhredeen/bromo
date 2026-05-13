@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.LibrarySourceProvider;
 import com.almato.bromo.compiler.SourceResolver;
 import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.symbol.SymbolIndex;
@@ -166,7 +167,9 @@ final class DefinitionFeatureTest {
     }
 
     private static SourceResolver sourceResolver(Path tmp) {
-        return new SourceResolver(new JdkProvider(tmp.resolve("target/bromo-cache/sources/jdk")));
+        return new SourceResolver(
+                new JdkProvider(tmp.resolve("target/bromo-cache/sources/jdk")),
+                new LibrarySourceProvider(List.of(), tmp.resolve("target/bromo-cache/sources/lib")));
     }
 
     private static Path mkdirs(Path p) throws IOException {

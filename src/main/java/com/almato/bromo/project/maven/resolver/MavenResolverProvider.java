@@ -131,11 +131,15 @@ public final class MavenResolverProvider implements ProjectModelProvider {
 
     // ---- dependency resolution --------------------------------------------
 
-    /// Resolves the main-jar classpath. Source attachments (`-sources.jar`)
-    /// are intentionally **not** fetched here — they cost an extra round of
-    /// resolution per dependency and would inflate cold-load time (the metric
-    /// driving the R1 replacement trigger). Goto-definition fetches them
-    /// lazily on first use through a separate resolver.
+    /// Resolves the main-jar classpath and attaches any sibling
+    /// `-sources.jar` that already exists in the local Maven repository.
+    ///
+    /// We deliberately **don't** kick off a second Aether resolution to
+    /// download missing source artifacts: that would double cold-load time,
+    /// which is the metric driving the R1 replacement trigger. Most users
+    /// already have sources cached locally (IDE auto-fetch, or a one-shot
+    /// `mvn dependency:sources`); when they don't, goto-def into that
+    /// library falls back to empty until on-demand fetching lands.
     private static List<ClasspathEntry> resolveClasspath(
             Model model,
             RepositorySystem system,
@@ -154,7 +158,8 @@ public final class MavenResolverProvider implements ProjectModelProvider {
             for (ArtifactResult ar : result.getArtifactResults()) {
                 File f = ar.getArtifact().getFile();
                 if (f != null) {
-                    classpath.add(ClasspathEntry.of(f.toPath()));
+                    Path binary = f.toPath();
+                    classpath.add(new ClasspathEntry(binary, siblingSourcesJar(binary)));
                 }
             }
             return List.copyOf(classpath);
@@ -162,6 +167,14 @@ public final class MavenResolverProvider implements ProjectModelProvider {
             throw new IOException("dependency resolution failed for "
                     + model.getGroupId() + ":" + model.getArtifactId(), e);
         }
+    }
+
+    private static Optional<Path> siblingSourcesJar(Path binary) {
+        String name = binary.getFileName().toString();
+        if (!name.endsWith(".jar")) return Optional.empty();
+        String sourcesName = name.substring(0, name.length() - ".jar".length()) + "-sources.jar";
+        Path sibling = binary.resolveSibling(sourcesName);
+        return Files.isRegularFile(sibling) ? Optional.of(sibling) : Optional.empty();
     }
 
     private static org.eclipse.aether.artifact.Artifact toAether(org.apache.maven.model.Dependency dep) {

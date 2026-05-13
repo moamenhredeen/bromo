@@ -1,6 +1,7 @@
 package com.almato.bromo.workspace;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.LibrarySourceProvider;
 import com.almato.bromo.compiler.SourceResolver;
 import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.project.ProjectModel;
@@ -26,6 +27,7 @@ public final class Workspace {
     private volatile EcjContext ecj;
     private volatile SourceResolver sources;
     private volatile JdkProvider jdk;
+    private volatile LibrarySourceProvider library;
 
     public FileStore files() {
         return fileStore;
@@ -68,17 +70,19 @@ public final class Workspace {
         // Source-attachment cache lives under target/ so `mvn clean` wipes it.
         // We do not put it under .git or the workspace root proper — it's
         // generated data the build owns.
-        Path cacheDir = root.resolve("target").resolve("bromo-cache").resolve("sources").resolve("jdk");
-        this.jdk = new JdkProvider(cacheDir);
-        this.sources = new SourceResolver(jdk);
+        Path cacheRoot = root.resolve("target").resolve("bromo-cache").resolve("sources");
+        this.jdk = new JdkProvider(cacheRoot.resolve("jdk"));
+        this.library = new LibrarySourceProvider(model.classpath(), cacheRoot.resolve("lib"));
+        this.sources = new SourceResolver(jdk, library);
 
         new WorkspaceScanner().scanInto(symbols, model.sourceRoots());
     }
 
-    /// Releases held resources (the JDK source-zip filesystem handle, the
-    /// compile engine). Idempotent.
+    /// Releases held resources (zip filesystem handles, the compile engine).
+    /// Idempotent.
     public void close() {
         if (jdk != null) jdk.close();
+        if (library != null) library.close();
         if (ecj != null) {
             try { ecj.close(); } catch (Exception ignored) {}
         }

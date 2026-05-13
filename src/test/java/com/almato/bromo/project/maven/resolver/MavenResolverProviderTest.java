@@ -49,6 +49,26 @@ final class MavenResolverProviderTest {
     }
 
     @Test
+    @DisplayName("classpath entries attach sibling -sources.jar when present locally")
+    void attachesSiblingSourceJars() throws Exception {
+        var provider = new MavenResolverProvider();
+        var model = (MavenProjectModel) provider.load(Path.of(".").toAbsolutePath().normalize());
+        // We don't assume any specific dep ships sources locally — that depends
+        // on the developer's ~/.m2 state. We only assert the modelling is
+        // consistent: any sources attachment that's present must (a) live next
+        // to its binary and (b) actually exist on disk.
+        for (var entry : model.classpath()) {
+            if (entry.sources().isEmpty()) continue;
+            var sourcesPath = entry.sources().get();
+            assertTrue(java.nio.file.Files.isRegularFile(sourcesPath),
+                    "sources jar must exist on disk: " + sourcesPath);
+            assertEquals(entry.binary().getParent(), sourcesPath.getParent(),
+                    "sources jar must sit alongside its binary: " + sourcesPath
+                            + " vs " + entry.binary());
+        }
+    }
+
+    @Test
     @DisplayName("classpath resolves all direct deps + transitives we know we use")
     void resolvesClasspath() throws Exception {
         var provider = new MavenResolverProvider();

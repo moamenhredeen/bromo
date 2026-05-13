@@ -39,15 +39,22 @@ import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 /// the relevant compilation unit, parse it, and walk the AST to find the
 /// declaring node by name and (for methods) erased signature.
 ///
-/// **v0 scope**: JDK sources only, via [JdkProvider]. Maven `-sources.jar`
-/// attachments arrive in the follow-up commit; the same orchestration
-/// applies — a different provider feeds [#resolve].
+/// Two source backends:
+/// - [JdkProvider] reads from `lib/src.zip` for JDK modules (`java.*`,
+///   `jdk.*`, `javafx.*`).
+/// - [LibrarySourceProvider] reads from per-jar `-sources.jar` attachments
+///   for everything else on the classpath.
+///
+/// The split is along binding modules — `ITypeBinding#getModule#getName`
+/// tells us which backend owns a given type.
 public final class SourceResolver {
 
     private final JdkProvider jdk;
+    private final LibrarySourceProvider library;
 
-    public SourceResolver(JdkProvider jdk) {
+    public SourceResolver(JdkProvider jdk, LibrarySourceProvider library) {
         this.jdk = jdk;
+        this.library = library;
     }
 
     public Optional<DefinitionResult> resolve(IBinding binding) {
@@ -60,18 +67,14 @@ public final class SourceResolver {
         ITypeBinding topLevel = topLevel(owning);
         IModuleBinding module = topLevel.getModule();
         String moduleName = module == null ? null : module.getName();
-        if (!isJdkModule(moduleName)) {
-            // Not JDK — handled by the Maven sources resolver in the next
-            // commit. Returning empty here lets DefinitionFeature surface
-            // "no result" rather than landing the user at the wrong place.
-            return Optional.empty();
-        }
 
         String pkg = topLevel.getPackage() == null ? "" : topLevel.getPackage().getName();
         String simple = topLevel.getName();
         if (simple == null || simple.isEmpty()) return Optional.empty();
 
-        Optional<Path> sourcePath = jdk.resolveSource(moduleName, pkg, simple);
+        Optional<Path> sourcePath = isJdkModule(moduleName)
+                ? jdk.resolveSource(moduleName, pkg, simple)
+                : library.resolveSource(pkg, simple);
         if (sourcePath.isEmpty()) return Optional.empty();
 
         URI sourceUri = sourcePath.get().toUri();
