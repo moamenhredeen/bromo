@@ -6,12 +6,232 @@
 
     <groupId>com.almato</groupId>
     <artifactId>bromo</artifactId>
-    <version>1.0-SNAPSHOT</version>
+    <version>0.0.1-SNAPSHOT</version>
+    <packaging>jar</packaging>
+
+    <name>bromo</name>
+    <description>An ultra-fast Java language server.</description>
 
     <properties>
         <maven.compiler.source>25</maven.compiler.source>
         <maven.compiler.target>25</maven.compiler.target>
+        <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+
+        <!-- runtime deps -->
+        <ecj.version>3.42.0</ecj.version>
+        <lsp4j.version>0.23.1</lsp4j.version>
+        <maven-resolver.version>1.9.22</maven-resolver.version>
+        <maven-resolver-provider.version>3.9.9</maven-resolver-provider.version>
+
+        <!-- test deps -->
+        <junit.version>5.11.4</junit.version>
+        <jqwik.version>1.9.2</jqwik.version>
+
+        <!-- plugins -->
+        <maven-compiler-plugin.version>3.13.0</maven-compiler-plugin.version>
+        <maven-surefire-plugin.version>3.5.2</maven-surefire-plugin.version>
+        <maven-shade-plugin.version>3.6.0</maven-shade-plugin.version>
+        <exec-maven-plugin.version>3.5.0</exec-maven-plugin.version>
     </properties>
 
+    <dependencies>
+        <!-- Semantic engine (steady-state dep). The `ecj` artifact is just the
+             batch compiler; the DOM AST + CompletionEngine + SelectionEngine
+             we rely on live in `org.eclipse.jdt.core`. -->
+        <dependency>
+            <groupId>org.eclipse.jdt</groupId>
+            <artifactId>org.eclipse.jdt.core</artifactId>
+            <version>${ecj.version}</version>
+        </dependency>
+
+        <!-- LSP wire (v0; scheduled for replacement on the R2 trigger) -->
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j</artifactId>
+            <version>${lsp4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.lsp4j</groupId>
+            <artifactId>org.eclipse.lsp4j.jsonrpc</artifactId>
+            <version>${lsp4j.version}</version>
+        </dependency>
+
+        <!-- Project model (v0; scheduled for replacement on the R1 trigger).
+
+             NOTE: maven-resolver-api / -spi / -util / -named-locks and
+             maven-model* are transitive deps of the artifacts below, but the
+             `MavenRepositorySystemUtils.newSession()` factory we use in
+             `MavenResolverProvider` is designed for in-Maven use and filters
+             these out during graph collection (treats them as "provided by
+             the runtime"). For standalone use we declare them explicitly so
+             bromo's own classpath resolution sees them. -->
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-api</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-spi</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-util</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-named-locks</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-model</artifactId>
+            <version>${maven-resolver-provider.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-model-builder</artifactId>
+            <version>${maven-resolver-provider.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-impl</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-transport-http</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-transport-file</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven.resolver</groupId>
+            <artifactId>maven-resolver-connector-basic</artifactId>
+            <version>${maven-resolver.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.maven</groupId>
+            <artifactId>maven-resolver-provider</artifactId>
+            <version>${maven-resolver-provider.version}</version>
+        </dependency>
+
+        <!-- Tests -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
+            <version>${jqwik.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+                <configuration>
+                    <release>25</release>
+                    <compilerArgs>
+                        <!-- Enable preview for StructuredTaskScope + ScopedValue (Java 25 preview). -->
+                        <arg>--enable-preview</arg>
+                    </compilerArgs>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${maven-surefire-plugin.version}</version>
+                <configuration>
+                    <argLine>--enable-preview -XX:+UseZGC</argLine>
+                    <!-- jqwik registers via ServiceLoader; nothing special required -->
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>${exec-maven-plugin.version}</version>
+                <configuration>
+                    <mainClass>com.almato.bromo.Main</mainClass>
+                    <commandlineArgs>--stdio</commandlineArgs>
+                </configuration>
+            </plugin>
+
+            <!-- Produces target/bromo.jar — a single self-contained launcher
+                 used by the `bromo` / `bromo.bat` scripts at the repo root. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>${maven-shade-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <finalName>bromo</finalName>
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
+                            <transformers>
+                                <transformer
+                                    implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.almato.bromo.Main</mainClass>
+                                </transformer>
+                                <transformer
+                                    implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                        <exclude>META-INF/MANIFEST.MF</exclude>
+                                        <exclude>module-info.class</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <!-- mvn test -Pbench  → run only *Bench.java -->
+        <profile>
+            <id>bench</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <includes>
+                                <include>**/*Bench.java</include>
+                            </includes>
+                            <argLine>--enable-preview -XX:+UseZGC -Xms256m -Xmx1g</argLine>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
