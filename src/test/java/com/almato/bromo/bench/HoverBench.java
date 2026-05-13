@@ -3,7 +3,10 @@ package com.almato.bromo.bench;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.LibrarySourceProvider;
+import com.almato.bromo.compiler.SourceResolver;
 import com.almato.bromo.features.HoverFeature;
+import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.project.maven.MavenProjectModel;
 import com.almato.bromo.project.maven.resolver.MavenResolverProvider;
 import com.almato.bromo.util.CancelToken;
@@ -24,7 +27,10 @@ final class HoverBench {
         var model = (MavenProjectModel) new MavenResolverProvider().load(root);
         var files = new FileStore();
         var ctx = new EcjContext(files, model.sourceRoots(), model.classpathBinaries());
-        var hover = new HoverFeature(ctx, files);
+        var sources = new SourceResolver(
+                new JdkProvider(root.resolve("target/bromo-cache/sources/jdk")),
+                new LibrarySourceProvider(model.classpath(), root.resolve("target/bromo-cache/sources/lib")));
+        var hover = new HoverFeature(ctx, files, sources);
 
         var mainJava = root.resolve("src/main/java/com/almato/bromo/Main.java").toUri();
         // Warmup

@@ -58,6 +58,22 @@ public final class SourceResolver {
     }
 
     public Optional<DefinitionResult> resolve(IBinding binding) {
+        return resolveDeclaration(binding).map(rd -> {
+            Span name = nameSpan(rd.node());
+            return new DefinitionResult(
+                    rd.sourceUri(), name.start(), name.start() + name.length());
+        });
+    }
+
+    /// Walks the binding down to its declaring node inside the attached
+    /// source file. Returned [ResolvedDeclaration] carries the source URI,
+    /// the AST node (a [AbstractTypeDeclaration] for types,
+    /// [org.eclipse.jdt.core.dom.MethodDeclaration] for methods,
+    /// [org.eclipse.jdt.core.dom.VariableDeclarationFragment] for fields,
+    /// [org.eclipse.jdt.core.dom.EnumConstantDeclaration] for enum
+    /// constants), and the raw source content so callers can pull
+    /// surrounding context (e.g. javadoc) without re-reading the file.
+    public Optional<ResolvedDeclaration> resolveDeclaration(IBinding binding) {
         if (binding == null) return Optional.empty();
 
         ITypeBinding owning = owningType(binding);
@@ -78,21 +94,16 @@ public final class SourceResolver {
         if (sourcePath.isEmpty()) return Optional.empty();
 
         URI sourceUri = sourcePath.get().toUri();
-        CompilationUnit cu = parse(sourcePath.get());
-        if (cu == null) {
-            return Optional.of(new DefinitionResult(sourceUri, 0, 0));
-        }
+        ParsedSource parsed = parse(sourcePath.get());
+        if (parsed == null) return Optional.empty();
 
-        AbstractTypeDeclaration enclosing = navigateToNestedType(cu, topLevel, owning);
-        if (enclosing == null) {
-            return Optional.of(new DefinitionResult(sourceUri, 0, 0));
-        }
+        AbstractTypeDeclaration enclosing = navigateToNestedType(
+                parsed.cu(), topLevel, owning);
+        if (enclosing == null) return Optional.empty();
 
         ASTNode target = pickTarget(enclosing, binding);
         ASTNode anchor = target != null ? target : enclosing;
-        Span name = nameSpan(anchor);
-        return Optional.of(new DefinitionResult(
-                sourceUri, name.start(), name.start() + name.length()));
+        return Optional.of(new ResolvedDeclaration(sourceUri, anchor, parsed.content()));
     }
 
     // ---- binding navigation ------------------------------------------------
@@ -295,22 +306,30 @@ public final class SourceResolver {
 
     // ---- parsing -----------------------------------------------------------
 
+    private record ParsedSource(CompilationUnit cu, char[] content) {}
+
     @SuppressWarnings("deprecation")
-    private static CompilationUnit parse(Path sourceFile) {
+    private static ParsedSource parse(Path sourceFile) {
         try {
             char[] content = Files.readString(sourceFile, StandardCharsets.UTF_8).toCharArray();
             var parser = ASTParser.newParser(AST.JLS_Latest);
             parser.setKind(ASTParser.K_COMPILATION_UNIT);
             String latest = JavaCore.latestSupportedJavaVersion();
-            parser.setCompilerOptions(java.util.Map.of(
-                    JavaCore.COMPILER_SOURCE, latest,
-                    JavaCore.COMPILER_COMPLIANCE, latest,
-                    JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, latest));
+            // setCompilerOptions(Map) replaces ALL defaults; we must set
+            // COMPILER_DOC_COMMENT_SUPPORT explicitly or javadoc nodes won't
+            // attach to body declarations and hover loses its doc body.
+            var options = new java.util.HashMap<String, String>();
+            options.put(JavaCore.COMPILER_SOURCE, latest);
+            options.put(JavaCore.COMPILER_COMPLIANCE, latest);
+            options.put(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, latest);
+            options.put(JavaCore.COMPILER_DOC_COMMENT_SUPPORT, JavaCore.ENABLED);
+            parser.setCompilerOptions(options);
             parser.setSource(content);
             parser.setResolveBindings(false);
             parser.setStatementsRecovery(true);
             parser.setUnitName("/" + sourceFile.getFileName());
-            return (CompilationUnit) parser.createAST(null);
+            var cu = (CompilationUnit) parser.createAST(null);
+            return new ParsedSource(cu, content);
         } catch (IOException e) {
             return null;
         }

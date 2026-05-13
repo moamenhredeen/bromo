@@ -1,8 +1,12 @@
 package com.almato.bromo.features;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.LibrarySourceProvider;
+import com.almato.bromo.compiler.SourceResolver;
+import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.project.maven.MavenProjectModel;
 import com.almato.bromo.project.maven.resolver.MavenResolverProvider;
 import com.almato.bromo.util.CancelToken;
@@ -33,7 +37,7 @@ final class HoverFeatureTest {
 
         var files = new FileStore();
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files);
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
 
         int offset = source.indexOf("Foo other") + "F".length() - 1;
         var result = hover.hover(file.toUri(), offset, CancelToken.never());
@@ -58,7 +62,7 @@ final class HoverFeatureTest {
         var files = new FileStore();
         // Empty classpath is enough — JDK is auto-discovered via jrt-fs in parseWithBindings.
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files);
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
 
         int offset = source.indexOf("String");
         var result = hover.hover(file.toUri(), offset, CancelToken.never());
@@ -83,13 +87,56 @@ final class HoverFeatureTest {
 
         var files = new FileStore();
         var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
-        var hover = new HoverFeature(ctx, files);
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
 
         int offset = source.indexOf("doubled(21)");
         var result = hover.hover(file.toUri(), offset, CancelToken.never());
         assertTrue(result.isPresent(), "expected hover");
         assertTrue(result.get().markdown().contains("doubled"),
                 "expected method name in hover; got " + result.get().markdown());
+    }
+
+    @Test
+    @DisplayName("hover on JDK type includes javadoc from src.zip")
+    void hoverOnJdkTypeWithDoc(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        var file = src.resolve("Use.java");
+        var source = """
+                package example;
+                public class Use {
+                    String s;
+                }
+                """;
+        Files.writeString(file, source, StandardCharsets.UTF_8);
+
+        assumeTrue(new JdkProvider(tmp.resolve("probe")).available(),
+                "JDK does not ship src.zip — skipping javadoc test.");
+
+        var files = new FileStore();
+        var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
+
+        int offset = source.indexOf("String");
+        var result = hover.hover(file.toUri(), offset, CancelToken.never());
+        assertTrue(result.isPresent(), "expected hover");
+        var md = result.get().markdown();
+        assertTrue(md.contains("java.lang.String"),
+                "expected the qualified name; got " + md);
+        // Javadoc on java.lang.String mentions strings of characters in
+        // its first paragraph across every JDK version we care about.
+        assertTrue(md.toLowerCase().contains("string"),
+                "expected javadoc body in hover output; got " + md);
+        // Smell-test: the markdown should now be appreciably longer than the
+        // bare signature. The pre-javadoc render of `String` is ~120 chars.
+        assertTrue(md.length() > 300,
+                "javadoc should expand the hover output; was only "
+                        + md.length() + " chars: " + md);
+    }
+
+    private static SourceResolver sourceResolver(Path tmp) {
+        return new SourceResolver(
+                new JdkProvider(tmp.resolve("target/bromo-cache/sources/jdk")),
+                new LibrarySourceProvider(List.of(), tmp.resolve("target/bromo-cache/sources/lib")));
     }
 
     private static Path mkdirs(Path p) throws IOException {

@@ -112,12 +112,13 @@ public final class BromoTextDocumentService implements TextDocumentService {
     public CompletableFuture<Hover> hover(HoverParams params) {
         return CompletableFuture.supplyAsync(() -> {
             var ecj = workspace.ecj().orElse(null);
-            if (ecj == null) return null;
+            var sources = workspace.sources().orElse(null);
+            if (ecj == null || sources == null) return null;
             URI uri = Adapters.uri(params.getTextDocument());
             CharSequence content = contentOf(uri);
             if (content == null) return null;
             int offset = Adapters.offset(content, params.getPosition());
-            var feature = new HoverFeature(ecj, workspace.files());
+            var feature = new HoverFeature(ecj, workspace.files(), sources);
             return feature.hover(uri, offset, CancelToken.never())
                     .map(r -> Adapters.toLspHover(r, content))
                     .orElse(null);

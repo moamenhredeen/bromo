@@ -1,6 +1,8 @@
 package com.almato.bromo.features;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.ResolvedDeclaration;
+import com.almato.bromo.compiler.SourceResolver;
 import com.almato.bromo.util.CancelToken;
 import com.almato.bromo.workspace.FileStore;
 import java.io.IOException;
@@ -39,10 +41,12 @@ public final class HoverFeature {
 
     private final EcjContext ecj;
     private final FileStore files;
+    private final SourceResolver sources;
 
-    public HoverFeature(EcjContext ecj, FileStore files) {
+    public HoverFeature(EcjContext ecj, FileStore files, SourceResolver sources) {
         this.ecj = ecj;
         this.files = files;
+        this.sources = sources;
     }
 
     public Optional<HoverResult> hover(URI uri, int offset, CancelToken cancel) {
@@ -62,10 +66,38 @@ public final class HoverFeature {
 
         String markdown = render(binding, cu, content);
 
+        // If the binding points outside the current CU and the signature
+        // doesn't already carry its javadoc, try to pull it from the source
+        // attachment (JDK src.zip or library -sources.jar). Without this we
+        // only ever render docs for in-workspace declarations.
+        if (cu.findDeclaringNode(binding) == null) {
+            var attached = sources.resolveDeclaration(binding);
+            if (attached.isPresent()) {
+                String doc = extractDocFromAttachment(attached.get());
+                if (!doc.isBlank()) {
+                    markdown = markdown + "\n\n" + doc;
+                }
+            }
+        }
+
         return Optional.of(new HoverResult(
                 markdown,
                 node.getStartPosition(),
                 node.getStartPosition() + node.getLength()));
+    }
+
+    private static String extractDocFromAttachment(ResolvedDeclaration rd) {
+        BodyDeclaration owner = enclosingBodyDeclaration(rd.node());
+        if (owner == null || owner.getJavadoc() == null) return "";
+        return extractJavadoc(owner.getJavadoc(), rd.sourceContent());
+    }
+
+    private static BodyDeclaration enclosingBodyDeclaration(ASTNode node) {
+        ASTNode current = node;
+        while (current != null && !(current instanceof BodyDeclaration)) {
+            current = current.getParent();
+        }
+        return (BodyDeclaration) current;
     }
 
     private Optional<char[]> readContent(URI uri) {
