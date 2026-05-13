@@ -1,13 +1,41 @@
+# Maven
 target/
 !.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+
+# JVM
+*.class
+hs_err_pid*
+replay_pid*
+
+# Leyden AOT artifacts
+*.aot
+*.aotconf
+*.cds
+
+# jqwik property-test failure cache
+.jqwik-database
+
+# Claude (plans, settings, agent state — local-only)
+.claude/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
 .kotlin
 
-### IntelliJ IDEA ###
-.idea/
-
-### Eclipse ###
+# Eclipse
 .apt_generated
 .classpath
 .factorypath
@@ -16,7 +44,7 @@ target/
 .springBeans
 .sts4-cache
 
-### NetBeans ###
+# NetBeans
 /nbproject/private/
 /nbbuild/
 /dist/
@@ -26,8 +54,13 @@ build/
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-### VS Code ###
+# VS Code
 .vscode/
 
-### Mac OS ###
+# OS
 .DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
