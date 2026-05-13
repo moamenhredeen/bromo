@@ -1,5 +1,6 @@
 package com.almato.bromo.project.maven.resolver;
 
+import com.almato.bromo.project.ClasspathEntry;
 import com.almato.bromo.project.ProjectModel;
 import com.almato.bromo.project.ProjectModelProvider;
 import com.almato.bromo.project.maven.MavenProjectModel;
@@ -64,7 +65,7 @@ public final class MavenResolverProvider implements ProjectModelProvider {
         DefaultRepositorySystemSession session = newSession(system);
         List<RemoteRepository> remotes = List.of(centralRepository());
 
-        List<Path> classpath = resolveClasspath(model, system, session, remotes);
+        List<ClasspathEntry> classpath = resolveClasspath(model, system, session, remotes);
         List<Path> sourceRoots = computeSourceRoots(workspaceRoot, model);
         Optional<String> javaRelease = readJavaRelease(model);
 
@@ -130,7 +131,12 @@ public final class MavenResolverProvider implements ProjectModelProvider {
 
     // ---- dependency resolution --------------------------------------------
 
-    private static List<Path> resolveClasspath(
+    /// Resolves the main-jar classpath. Source attachments (`-sources.jar`)
+    /// are intentionally **not** fetched here — they cost an extra round of
+    /// resolution per dependency and would inflate cold-load time (the metric
+    /// driving the R1 replacement trigger). Goto-definition fetches them
+    /// lazily on first use through a separate resolver.
+    private static List<ClasspathEntry> resolveClasspath(
             Model model,
             RepositorySystem system,
             DefaultRepositorySystemSession session,
@@ -144,11 +150,11 @@ public final class MavenResolverProvider implements ProjectModelProvider {
 
         try {
             var result = system.resolveDependencies(session, new DependencyRequest(collect, null));
-            List<Path> classpath = new ArrayList<>();
+            List<ClasspathEntry> classpath = new ArrayList<>();
             for (ArtifactResult ar : result.getArtifactResults()) {
                 File f = ar.getArtifact().getFile();
                 if (f != null) {
-                    classpath.add(f.toPath());
+                    classpath.add(ClasspathEntry.of(f.toPath()));
                 }
             }
             return List.copyOf(classpath);

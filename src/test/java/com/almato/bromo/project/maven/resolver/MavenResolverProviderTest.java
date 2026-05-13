@@ -54,7 +54,7 @@ final class MavenResolverProviderTest {
         var provider = new MavenResolverProvider();
         var model = (MavenProjectModel) provider.load(Path.of(".").toAbsolutePath().normalize());
         var jarNames = model.classpath().stream()
-                .map(p -> p.getFileName().toString())
+                .map(e -> e.binary().getFileName().toString())
                 .toList();
 
         // Direct runtime deps

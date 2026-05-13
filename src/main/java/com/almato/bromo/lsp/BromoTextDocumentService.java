@@ -129,12 +129,15 @@ public final class BromoTextDocumentService implements TextDocumentService {
             DefinitionParams params) {
         return CompletableFuture.supplyAsync(() -> {
             var ecj = workspace.ecj().orElse(null);
-            if (ecj == null) return Either.<List<? extends Location>, List<? extends LocationLink>>forLeft(List.of());
+            var sources = workspace.sources().orElse(null);
+            if (ecj == null || sources == null) {
+                return Either.<List<? extends Location>, List<? extends LocationLink>>forLeft(List.of());
+            }
             URI uri = Adapters.uri(params.getTextDocument());
             CharSequence content = contentOf(uri);
             if (content == null) return Either.<List<? extends Location>, List<? extends LocationLink>>forLeft(List.of());
             int offset = Adapters.offset(content, params.getPosition());
-            var feature = new DefinitionFeature(ecj, workspace.files(), workspace.symbols());
+            var feature = new DefinitionFeature(ecj, workspace.files(), workspace.symbols(), sources);
             var result = feature.definition(uri, offset, CancelToken.never());
             if (result.isEmpty()) {
                 return Either.<List<? extends Location>, List<? extends LocationLink>>forLeft(List.of());

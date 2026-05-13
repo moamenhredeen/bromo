@@ -71,9 +71,7 @@ public final class BromoLanguageServer implements LanguageServer, LanguageClient
     @Override
     public CompletableFuture<Object> shutdown() {
         textDocuments.shutdown();
-        workspace.ecj().ifPresent(ecj -> {
-            try { ecj.close(); } catch (Exception ignored) {}
-        });
+        workspace.close();
         return CompletableFuture.completedFuture(null);
     }
 

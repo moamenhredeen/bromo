@@ -18,9 +18,17 @@ public interface ProjectModel {
     /// or the empty list if none were detected.
     List<Path> sourceRoots();
 
-    /// Resolved classpath — every jar / class directory the compiler needs to attribute
-    /// the source tree. Order matters (earlier entries win on conflict).
-    List<Path> classpath();
+    /// Resolved classpath. Each entry pairs a compiled artifact with its
+    /// optional source attachment. Order matters: earlier entries win on
+    /// conflict, matching javac's classpath ordering rules.
+    List<ClasspathEntry> classpath();
+
+    /// Convenience view of [#classpath()] reduced to binary paths only.
+    /// ECJ's `INameEnvironment` and friends only need compiled artifacts,
+    /// so most compile-side callers reach for this projection.
+    default List<Path> classpathBinaries() {
+        return classpath().stream().map(ClasspathEntry::binary).toList();
+    }
 
     /// Target JDK release (e.g. `"25"`). Maps to javac/ECJ `--release`.
     Optional<String> javaRelease();

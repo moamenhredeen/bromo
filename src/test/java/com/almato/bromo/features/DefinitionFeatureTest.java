@@ -2,8 +2,11 @@ package com.almato.bromo.features;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.SourceResolver;
+import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.symbol.SymbolIndex;
 import com.almato.bromo.symbol.WorkspaceScanner;
 import com.almato.bromo.util.CancelToken;
@@ -88,7 +91,7 @@ final class DefinitionFeatureTest {
         var ctx = new EcjContext(fs, List.of(tmp.resolve("src/main/java")), List.of());
         // Build the symbol index so the fallback path has something to find.
         var symbols = new WorkspaceScanner().scan(List.of(tmp.resolve("src/main/java"))).index();
-        var feature = new DefinitionFeature(ctx, fs, symbols);
+        var feature = new DefinitionFeature(ctx, fs, symbols, sourceResolver(tmp));
 
         int callSite = userSrc.indexOf("Helper.doubled(21)") + "Helper.".length();
         var result = feature.definition(user.toUri(), callSite, CancelToken.never());
@@ -97,11 +100,73 @@ final class DefinitionFeatureTest {
                 "expected jump to Helper.java; got " + result.get().uri());
     }
 
+    @Test
+    @DisplayName("JDK type reference resolves to src.zip — java.lang.String")
+    void jdkType(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        var file = src.resolve("Use.java");
+        var source = """
+                package example;
+                public class Use {
+                    String s;
+                }
+                """;
+        Files.writeString(file, source, StandardCharsets.UTF_8);
+
+        var feature = newFeature(tmp);
+        assumeTrue(new JdkProvider(tmp.resolve("probe")).available(),
+                "JDK does not ship src.zip — skipping JDK navigation test.");
+
+        int cursor = source.indexOf("String s");
+        var result = feature.definition(file.toUri(), cursor, CancelToken.never());
+        assertTrue(result.isPresent(), "expected definition into JDK source");
+        assertTrue(result.get().uri().toString().endsWith("String.java"),
+                "expected jump into String.java; got " + result.get().uri());
+
+        var jdkSource = Files.readString(Path.of(result.get().uri()), StandardCharsets.UTF_8);
+        var nameOffset = result.get().startOffset();
+        // The startOffset names the type identifier; the substring there must be "String".
+        assertEquals("String", jdkSource.substring(nameOffset, nameOffset + "String".length()));
+    }
+
+    @Test
+    @DisplayName("JDK method reference resolves into src.zip — String.length()")
+    void jdkMethod(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        var file = src.resolve("Use.java");
+        var source = """
+                package example;
+                public class Use {
+                    int run(String s) { return s.length(); }
+                }
+                """;
+        Files.writeString(file, source, StandardCharsets.UTF_8);
+
+        var feature = newFeature(tmp);
+        assumeTrue(new JdkProvider(tmp.resolve("probe")).available(),
+                "JDK does not ship src.zip — skipping JDK navigation test.");
+
+        int cursor = source.indexOf("length()");
+        var result = feature.definition(file.toUri(), cursor, CancelToken.never());
+        assertTrue(result.isPresent(), "expected definition into String#length");
+        assertTrue(result.get().uri().toString().endsWith("String.java"),
+                "expected jump into String.java");
+
+        var jdkSource = Files.readString(Path.of(result.get().uri()), StandardCharsets.UTF_8);
+        var nameOffset = result.get().startOffset();
+        assertEquals("length", jdkSource.substring(nameOffset, nameOffset + "length".length()),
+                "expected to land on the 'length' identifier of the method declaration");
+    }
+
     private DefinitionFeature newFeature(Path tmp) {
         var fs = new FileStore();
         var ctx = new EcjContext(fs, List.of(tmp.resolve("src/main/java")), List.of());
         var symbols = new SymbolIndex();
-        return new DefinitionFeature(ctx, fs, symbols);
+        return new DefinitionFeature(ctx, fs, symbols, sourceResolver(tmp));
+    }
+
+    private static SourceResolver sourceResolver(Path tmp) {
+        return new SourceResolver(new JdkProvider(tmp.resolve("target/bromo-cache/sources/jdk")));
     }
 
     private static Path mkdirs(Path p) throws IOException {

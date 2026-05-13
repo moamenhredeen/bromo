@@ -1,6 +1,7 @@
 package com.almato.bromo.features;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.SourceResolver;
 import com.almato.bromo.symbol.SymbolIndex;
 import com.almato.bromo.symbol.SymbolKind;
 import com.almato.bromo.util.CancelToken;
@@ -29,24 +30,31 @@ import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 
 /// Resolves an LSP `textDocument/definition` request.
 ///
-/// Two-stage strategy:
+/// Three-stage strategy:
 /// 1. **Fast in-file path**: parse the current file with bindings, find the
 ///    AST node at the cursor, resolve its binding, and look the declaration
 ///    up locally via `CompilationUnit#findDeclaringNode`.
-/// 2. **Cross-file fallback**: if the declaring node isn't in this CU, scan
-///    the workspace [SymbolIndex] for a descriptor with a matching simple
-///    name + kind. Returns the first match — adequate for v0, refined to
-///    use exact bindings at M6.5+.
+/// 2. **Workspace fallback (source bindings)**: when the binding is from
+///    source but declared elsewhere in the workspace, look it up in the
+///    [SymbolIndex] by simple name + kind. Refined to exact bindings at M6.5+.
+/// 3. **Source attachment (binary bindings)**: when the binding points at
+///    a binary classpath entry — the JDK or a library jar — hand off to
+///    [SourceResolver], which materialises the attached source and walks
+///    the AST to land on the declaration. This is the same pattern Eclipse
+///    JDT and IntelliJ use; it's what lets goto-def into `String#length`
+///    actually work.
 public final class DefinitionFeature {
 
     private final EcjContext ecj;
     private final FileStore files;
     private final SymbolIndex symbols;
+    private final SourceResolver sources;
 
-    public DefinitionFeature(EcjContext ecj, FileStore files, SymbolIndex symbols) {
+    public DefinitionFeature(EcjContext ecj, FileStore files, SymbolIndex symbols, SourceResolver sources) {
         this.ecj = ecj;
         this.files = files;
         this.symbols = symbols;
+        this.sources = sources;
     }
 
     public Optional<DefinitionResult> definition(URI uri, int offset, CancelToken cancel) {
@@ -74,8 +82,31 @@ public final class DefinitionFeature {
                     nameNode.getStartPosition() + nameNode.getLength()));
         }
 
-        // Fallback: workspace-wide symbol index by simple name + kind.
+        // Source-attachment path for binary bindings (JDK + library jars).
+        // Take this branch first: a `String` reference has a binary binding
+        // whose simple name might collide with a workspace class.
+        if (isFromBinary(binding)) {
+            var bin = sources.resolve(binding);
+            if (bin.isPresent()) return bin;
+        }
+
+        // Workspace fallback: source-defined declaration in another CU.
         return crossFileLookup(binding);
+    }
+
+    private static boolean isFromBinary(IBinding binding) {
+        return switch (binding) {
+            case ITypeBinding tb -> !tb.isFromSource();
+            case IMethodBinding mb -> {
+                var owner = mb.getDeclaringClass();
+                yield owner != null && !owner.isFromSource();
+            }
+            case IVariableBinding vb -> {
+                var owner = vb.getDeclaringClass();
+                yield owner != null && !owner.isFromSource();
+            }
+            default -> false;
+        };
     }
 
     private Optional<DefinitionResult> crossFileLookup(IBinding binding) {

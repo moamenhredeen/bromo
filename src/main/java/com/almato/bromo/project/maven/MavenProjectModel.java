@@ -1,5 +1,6 @@
 package com.almato.bromo.project.maven;
 
+import com.almato.bromo.project.ClasspathEntry;
 import com.almato.bromo.project.ProjectModel;
 import java.nio.file.Path;
 import java.util.List;
@@ -15,7 +16,7 @@ import java.util.Optional;
 public record MavenProjectModel(
         Path root,
         List<Path> sourceRoots,
-        List<Path> classpath,
+        List<ClasspathEntry> classpath,
         Optional<String> javaRelease,
         List<String> compilerArgs,
         String groupId,

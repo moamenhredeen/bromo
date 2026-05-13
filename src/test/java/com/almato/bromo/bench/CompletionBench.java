@@ -52,7 +52,7 @@ final class CompletionBench {
         var root = Path.of(".").toAbsolutePath().normalize();
         var model = (MavenProjectModel) new MavenResolverProvider().load(root);
         var fs = new FileStore();
-        var ecj = new EcjContext(fs, model.sourceRoots(), model.classpath());
+        var ecj = new EcjContext(fs, model.sourceRoots(), model.classpathBinaries());
         var symbols = new WorkspaceScanner().scan(model.sourceRoots()).index();
         var feature = new CompletionFeature(symbols, ecj);
 

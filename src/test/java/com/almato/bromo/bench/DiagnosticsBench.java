@@ -24,7 +24,7 @@ final class DiagnosticsBench {
     void compileBromo() throws Exception {
         var root = Path.of(".").toAbsolutePath().normalize();
         var model = (MavenProjectModel) new MavenResolverProvider().load(root);
-        try (var ctx = new EcjContext(new FileStore(), model.sourceRoots(), model.classpath())) {
+        try (var ctx = new EcjContext(new FileStore(), model.sourceRoots(), model.classpathBinaries())) {
 
             // Warmup — fills the cache so subsequent calls hit the M4.5 fast path.
             // To measure cold compile, we read the warmup result.

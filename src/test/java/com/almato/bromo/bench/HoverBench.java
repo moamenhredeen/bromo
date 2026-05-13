@@ -23,7 +23,7 @@ final class HoverBench {
         var root = Path.of(".").toAbsolutePath().normalize();
         var model = (MavenProjectModel) new MavenResolverProvider().load(root);
         var files = new FileStore();
-        var ctx = new EcjContext(files, model.sourceRoots(), model.classpath());
+        var ctx = new EcjContext(files, model.sourceRoots(), model.classpathBinaries());
         var hover = new HoverFeature(ctx, files);
 
         var mainJava = root.resolve("src/main/java/com/almato/bromo/Main.java").toUri();

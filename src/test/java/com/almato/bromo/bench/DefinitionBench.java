@@ -3,7 +3,9 @@ package com.almato.bromo.bench;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.almato.bromo.compiler.EcjContext;
+import com.almato.bromo.compiler.SourceResolver;
 import com.almato.bromo.features.DefinitionFeature;
+import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.project.maven.MavenProjectModel;
 import com.almato.bromo.project.maven.resolver.MavenResolverProvider;
 import com.almato.bromo.symbol.WorkspaceScanner;
@@ -26,9 +28,11 @@ final class DefinitionBench {
         var root = Path.of(".").toAbsolutePath().normalize();
         var model = (MavenProjectModel) new MavenResolverProvider().load(root);
         var fs = new FileStore();
-        var ctx = new EcjContext(fs, model.sourceRoots(), model.classpath());
+        var ctx = new EcjContext(fs, model.sourceRoots(), model.classpathBinaries());
         var symbols = new WorkspaceScanner().scan(model.sourceRoots()).index();
-        var feature = new DefinitionFeature(ctx, fs, symbols);
+        var sources = new SourceResolver(
+                new JdkProvider(root.resolve("target/bromo-cache/sources/jdk")));
+        var feature = new DefinitionFeature(ctx, fs, symbols, sources);
 
         var mainJava = root.resolve("src/main/java/com/almato/bromo/Main.java").toUri();
 
