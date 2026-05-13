@@ -97,6 +97,37 @@ final class HoverFeatureTest {
     }
 
     @Test
+    @DisplayName("hover on workspace type with markdown (///) javadoc includes the doc body")
+    void hoverOnMarkdownJavadoc(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        var file = src.resolve("Doodad.java");
+        var source = """
+                package example;
+
+                /// Wraps a single doodad with bells on.
+                ///
+                /// Used by widgets when they need a doodad.
+                public class Doodad {
+                    Doodad other;
+                }
+                """;
+        Files.writeString(file, source, StandardCharsets.UTF_8);
+
+        var files = new FileStore();
+        var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
+        var hover = new HoverFeature(ctx, files, sourceResolver(tmp));
+
+        int offset = source.indexOf("Doodad other");
+        var result = hover.hover(file.toUri(), offset, CancelToken.never());
+        assertTrue(result.isPresent(), "expected hover");
+        var md = result.get().markdown();
+        assertTrue(md.contains("Wraps a single doodad with bells on."),
+                "expected markdown javadoc body in hover; got:\n" + md);
+        assertTrue(md.contains("Used by widgets when they need a doodad."),
+                "expected second paragraph from markdown javadoc; got:\n" + md);
+    }
+
+    @Test
     @DisplayName("hover on JDK type includes javadoc from src.zip")
     void hoverOnJdkTypeWithDoc(@TempDir Path tmp) throws IOException {
         var src = mkdirs(tmp.resolve("src/main/java/example"));

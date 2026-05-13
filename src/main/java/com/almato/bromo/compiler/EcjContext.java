@@ -168,10 +168,17 @@ public final class EcjContext implements AutoCloseable {
 
     private static Map<String, String> astOptions() {
         String latest = JavaCore.latestSupportedJavaVersion();
-        return Map.of(
-                JavaCore.COMPILER_SOURCE, latest,
-                JavaCore.COMPILER_COMPLIANCE, latest,
-                JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, latest);
+        // setCompilerOptions(Map) replaces the parser's defaults wholesale, so
+        // any option we want to depend on must be set here. COMPILER_DOC_COMMENT_SUPPORT
+        // controls whether `///` markdown javadoc and `/** */` block javadoc
+        // attach as `Javadoc` AST nodes to their body declarations — without
+        // it hover renders signatures but loses every doc body.
+        var m = new HashMap<String, String>();
+        m.put(JavaCore.COMPILER_SOURCE, latest);
+        m.put(JavaCore.COMPILER_COMPLIANCE, latest);
+        m.put(JavaCore.COMPILER_CODEGEN_TARGET_PLATFORM, latest);
+        m.put(JavaCore.COMPILER_DOC_COMMENT_SUPPORT, JavaCore.ENABLED);
+        return m;
     }
 
     // ---- caching helpers ---------------------------------------------------
