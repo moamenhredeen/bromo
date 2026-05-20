@@ -35,6 +35,7 @@ public final class BromoLanguageServer implements LanguageServer, LanguageClient
     private final Workspace workspace = new Workspace();
     private final BromoTextDocumentService textDocuments = new BromoTextDocumentService(workspace);
     private final BromoWorkspaceService workspaceService = new BromoWorkspaceService(workspace);
+    private volatile LanguageClient client;
 
     @Override
     public CompletableFuture<InitializeResult> initialize(InitializeParams params) {
@@ -45,12 +46,20 @@ public final class BromoLanguageServer implements LanguageServer, LanguageClient
         capabilities.setCompletionProvider(new CompletionOptions(false, List.of(".")));
 
         Path root = resolveRoot(params);
+        var clientCaps = params.getCapabilities();
         if (root != null) {
             final Path target = root;
             Thread.ofVirtual().name("bromo-init", 1).start(() -> {
+                var progress = new Progress(client, clientCaps);
+                progress.begin("bromo: loading project");
                 try {
+                    progress.report("resolving Maven dependencies");
                     workspace.attachToRoot(target);
+                    progress.report("scanned " + workspace.symbols().size() + " symbols");
+                    progress.report("warming up compiler");
                     int warmed = workspace.preWarm();
+                    progress.end("ready (symbols=" + workspace.symbols().size()
+                            + ", preWarmed=" + warmed + ")");
                     LOG.log(System.Logger.Level.INFO,
                             () -> "workspace attached: " + target
                                     + " (sources="
@@ -60,6 +69,7 @@ public final class BromoLanguageServer implements LanguageServer, LanguageClient
                                     + ", symbols=" + workspace.symbols().size()
                                     + ", preWarmed=" + warmed + ")");
                 } catch (Exception e) {
+                    progress.end("attach failed: " + e.getMessage());
                     LOG.log(System.Logger.Level.WARNING,
                             "workspace attach failed for " + target, e);
                 }
@@ -87,6 +97,7 @@ public final class BromoLanguageServer implements LanguageServer, LanguageClient
 
     @Override
     public void connect(LanguageClient client) {
+        this.client = client;
         textDocuments.setClient(client);
     }
 
