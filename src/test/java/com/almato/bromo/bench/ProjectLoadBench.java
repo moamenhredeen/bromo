@@ -43,5 +43,8 @@ final class ProjectLoadBench {
         if (p95ms > 3_000) {
             System.out.println("  ⚠ R1 trigger fires: p95 > 3000ms — schedule hand-rolled replacement");
         }
+
+        // Project load: 5 samples, network + resolver init dominates → noisy.
+        Baseline.checkRegression("project-load.bromo", result, 50.0);
     }
 }

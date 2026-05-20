@@ -46,6 +46,9 @@ final class HoverBench {
                 + "p95=" + p95ms + "ms "
                 + "p99=" + (result.p99ns() / 1_000_000L) + "ms");
 
+        // 50-sample ECJ DOM parse — moderate variance.
+        Baseline.checkRegression("hover.bromo-main", result, 20.0);
+
         assertTrue(p95ms < 500,
                 "M5 sanity: hover p95 must be <500ms (relaxed from 80ms while uncached); was " + p95ms + "ms");
     }

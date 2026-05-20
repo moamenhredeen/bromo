@@ -42,6 +42,8 @@ final class CompletionBench {
         System.out.println("CompletionFeature.completionsAt(prefix=\"Pie\"): "
                 + "p50=" + (result.p50ns() / 1_000L) + "µs "
                 + "p95=" + p95us + "µs");
+        Baseline.checkRegression("completion.prefix-Pie", result);
+
         assertTrue(p95us < 40_000,
                 "M7 sanity: prefix completion p95 must be <40ms; was " + p95us + "µs");
     }
@@ -75,6 +77,9 @@ final class CompletionBench {
                 + "p50=" + (result.p50ns() / 1_000_000L) + "ms "
                 + "p95=" + p95ms + "ms "
                 + "p99=" + (result.p99ns() / 1_000_000L) + "ms");
+        // 30-sample ECJ binding resolution — moderate variance.
+        Baseline.checkRegression("completion.member-string-le", result, 20.0);
+
         assertTrue(p95ms < 500,
                 "M7.5 sanity: member-access p95 must be <500ms (uncached); was " + p95ms + "ms");
     }

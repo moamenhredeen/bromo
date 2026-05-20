@@ -29,6 +29,7 @@ final class DidChangeBench {
         });
 
         System.out.println("PieceTable.randomSingleCharInsert: " + result);
+        Baseline.checkRegression("didchange.piece-table-random-insert", result);
         assertTrue(result.p95ns() < 1_000_000L,
                 "p95 must be <1ms, was " + result.p95us() + "µs");
     }
@@ -39,6 +40,7 @@ final class DidChangeBench {
         var pt = new PieceTable("");
         var result = BenchRunner.measure(2_000, 10_000, () -> pt.insert(pt.length(), "x"));
         System.out.println("PieceTable.sequentialAppend: " + result);
+        Baseline.checkRegression("didchange.piece-table-sequential-append", result);
         assertTrue(result.p95ns() < 1_000_000L,
                 "p95 must be <1ms, was " + result.p95us() + "µs");
     }

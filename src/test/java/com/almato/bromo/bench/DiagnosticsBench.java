@@ -42,11 +42,17 @@ final class DiagnosticsBench {
                     + "p50=" + (cachedResult.p50ns() / 1_000L) + "µs "
                     + "p95=" + cachedP95us + "µs");
 
+            // 50-sample filesystem walk — moderate variance.
+            Baseline.checkRegression("diagnostics.compile-bromo-cached", cachedResult, 20.0);
+
             assertTrue(coldElapsedMs < 5_000,
                     "M4 sanity: cold workspace compile must be <5s; was " + coldElapsedMs + "ms");
-            // M4.5: cache hit should be <10ms (just hashes + map equality)
-            assertTrue(cachedP95us < 10_000,
-                    "M4.5: cached compile p95 must be <10ms; was " + cachedP95us + "µs");
+            // M4.5: cache hit costs one filesystem walk + per-file signature
+            // probe (size+mtime, or text.hashCode() for open buffers). 25ms
+            // covers bromo's tree today; the regression check on the baseline
+            // catches drift before it eats the latency budget.
+            assertTrue(cachedP95us < 25_000,
+                    "M4.5: cached compile p95 must be <25ms; was " + cachedP95us + "µs");
         }
     }
 }

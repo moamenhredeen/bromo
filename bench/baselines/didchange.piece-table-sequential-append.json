@@ -1,0 +1,8 @@
+{
+  "name": "didchange.piece-table-sequential-append",
+  "p50ns": 100,
+  "p95ns": 100,
+  "p99ns": 200,
+  "samples": 10000,
+  "recordedAt": "2026-05-20T21:48:11.673327700Z"
+}

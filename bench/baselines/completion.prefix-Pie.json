@@ -1,0 +1,8 @@
+{
+  "name": "completion.prefix-Pie",
+  "p50ns": 1200,
+  "p95ns": 3200,
+  "p99ns": 4600,
+  "samples": 10000,
+  "recordedAt": "2026-05-20T21:48:09.296937700Z"
+}

@@ -39,6 +39,10 @@ final class SymbolIndexBuildBench {
         var lookupResult = BenchRunner.measure(2_000, 20_000, () -> index.findByPrefix("Pie", 20));
         System.out.println("SymbolIndex.findByPrefix(\"Pie\"): " + lookupResult);
 
+        // Full workspace scan: 5 samples + filesystem walk → high variance.
+        Baseline.checkRegression("symbol-index.scan-bromo", scanResult, 50.0);
+        Baseline.checkRegression("symbol-index.lookup-Pie", lookupResult);
+
         assertTrue(p95scan < 5_000,
                 "M3 acceptance: scan p95 must be <5s; was " + p95scan + "ms");
         assertTrue(lookupResult.p95ns() < 30_000_000L,

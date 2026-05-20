@@ -1,0 +1,8 @@
+{
+  "name": "completion.member-string-le",
+  "p50ns": 12074200,
+  "p95ns": 18055500,
+  "p99ns": 20967700,
+  "samples": 30,
+  "recordedAt": "2026-05-20T21:48:09.213661400Z"
+}

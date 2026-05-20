@@ -1,0 +1,8 @@
+{
+  "name": "didchange.piece-table-random-insert",
+  "p50ns": 4400,
+  "p95ns": 10200,
+  "p99ns": 13200,
+  "samples": 10000,
+  "recordedAt": "2026-05-20T21:48:11.732189900Z"
+}

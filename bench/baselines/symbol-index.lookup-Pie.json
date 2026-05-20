@@ -1,0 +1,8 @@
+{
+  "name": "symbol-index.lookup-Pie",
+  "p50ns": 300,
+  "p95ns": 500,
+  "p99ns": 500,
+  "samples": 20000,
+  "recordedAt": "2026-05-20T21:48:13.663397400Z"
+}
