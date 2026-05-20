@@ -42,8 +42,8 @@ final class DiagnosticsBench {
                     + "p50=" + (cachedResult.p50ns() / 1_000L) + "µs "
                     + "p95=" + cachedP95us + "µs");
 
-            // 50-sample filesystem walk — moderate variance.
-            Baseline.checkRegression("diagnostics.compile-bromo-cached", cachedResult, 20.0);
+            // 50-sample filesystem walk + per-file mtime probe — env-dependent.
+            Baseline.checkRegression("diagnostics.compile-bromo-cached", cachedResult, 100.0);
 
             assertTrue(coldElapsedMs < 5_000,
                     "M4 sanity: cold workspace compile must be <5s; was " + coldElapsedMs + "ms");

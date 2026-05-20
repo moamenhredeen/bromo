@@ -86,6 +86,24 @@ public final class Workspace {
         new WorkspaceScanner().scanInto(symbols, model.sourceRoots());
     }
 
+    /// Eagerly parses a handful of source files so the first real LSP request
+    /// lands on a warm ECJ `LookupEnvironment` instead of paying first-touch
+    /// init. Intended to be called from a virtual thread immediately after
+    /// [#attachToRoot]. Silently no-ops when no compile engine is attached.
+    public int preWarm() {
+        var ctx = ecj;
+        if (ctx == null) return 0;
+        try {
+            return ctx.preWarm(PREWARM_FILE_BUDGET);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /// Small enough to keep `initialize` fast; large enough that ECJ has built
+    /// `LookupEnvironment` tables for the common types before the user types.
+    private static final int PREWARM_FILE_BUDGET = 4;
+
     /// Releases held resources (zip filesystem handles, the compile engine).
     /// Idempotent.
     public void close() {

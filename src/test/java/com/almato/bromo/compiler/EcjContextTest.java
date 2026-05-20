@@ -106,6 +106,46 @@ final class EcjContextTest {
         assertEquals(0, total, "expected no diagnostics, got: " + diags);
     }
 
+    @Test
+    @DisplayName("preWarm parses up to maxFiles source files without error")
+    void preWarmParsesSomeFiles(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        Files.writeString(src.resolve("A.java"), "package example; public class A {}", StandardCharsets.UTF_8);
+        Files.writeString(src.resolve("B.java"), "package example; public class B {}", StandardCharsets.UTF_8);
+        Files.writeString(src.resolve("C.java"), "package example; public class C {}", StandardCharsets.UTF_8);
+
+        try (var ctx = new EcjContext(new FileStore(),
+                List.of(tmp.resolve("src/main/java")), List.of())) {
+            int warmed = ctx.preWarm(2);
+            assertEquals(2, warmed, "preWarm should parse exactly maxFiles when more exist");
+        }
+    }
+
+    @Test
+    @DisplayName("preWarm caps at the number of source files available")
+    void preWarmCapsAtAvailable(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        Files.writeString(src.resolve("Only.java"), "package example; public class Only {}", StandardCharsets.UTF_8);
+
+        try (var ctx = new EcjContext(new FileStore(),
+                List.of(tmp.resolve("src/main/java")), List.of())) {
+            int warmed = ctx.preWarm(10);
+            assertEquals(1, warmed, "preWarm should stop after exhausting source files");
+        }
+    }
+
+    @Test
+    @DisplayName("preWarm(0) is a no-op")
+    void preWarmZeroIsNoop(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        Files.writeString(src.resolve("X.java"), "package example; public class X {}", StandardCharsets.UTF_8);
+
+        try (var ctx = new EcjContext(new FileStore(),
+                List.of(tmp.resolve("src/main/java")), List.of())) {
+            assertEquals(0, ctx.preWarm(0));
+        }
+    }
+
     private static Path mkdirs(Path p) throws IOException {
         Files.createDirectories(p);
         return p;

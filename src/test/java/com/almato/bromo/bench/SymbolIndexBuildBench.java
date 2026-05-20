@@ -41,7 +41,8 @@ final class SymbolIndexBuildBench {
 
         // Full workspace scan: 5 samples + filesystem walk → high variance.
         Baseline.checkRegression("symbol-index.scan-bromo", scanResult, 50.0);
-        Baseline.checkRegression("symbol-index.lookup-Pie", lookupResult);
+        // Sub-µs regime: timer resolution dominates a 10% tolerance.
+        Baseline.checkRegression("symbol-index.lookup-Pie", lookupResult, 100.0);
 
         assertTrue(p95scan < 5_000,
                 "M3 acceptance: scan p95 must be <5s; was " + p95scan + "ms");

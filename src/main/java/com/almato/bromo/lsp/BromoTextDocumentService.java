@@ -45,7 +45,11 @@ import org.eclipse.lsp4j.services.TextDocumentService;
 public final class BromoTextDocumentService implements TextDocumentService {
 
     private static final System.Logger LOG = System.getLogger(BromoTextDocumentService.class.getName());
-    private static final long DIAGNOSTIC_DEBOUNCE_MS = 200;
+    /// Diagnostic-publish debounce. Per the v0 plan (§Latency budgets) we
+    /// coalesce `didChange` events into a single workspace compile every
+    /// 150ms. Lower = more compile work on rapid typing; higher = visible
+    /// lag between the last keystroke and red squigglies.
+    private static final long DIAGNOSTIC_DEBOUNCE_MS = 150;
 
     private final Workspace workspace;
     private final Executor requestExecutor = Executors.newVirtualThreadPerTaskExecutor();

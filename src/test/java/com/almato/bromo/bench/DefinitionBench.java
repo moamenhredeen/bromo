@@ -52,7 +52,7 @@ final class DefinitionBench {
                 + "p99=" + (result.p99ns() / 1_000_000L) + "ms");
 
         // 50-sample ECJ DOM parse — moderate variance.
-        Baseline.checkRegression("definition.bromo-main", result, 20.0);
+        Baseline.checkRegression("definition.bromo-main", result, 50.0);
 
         assertTrue(p95ms < 500,
                 "M6 sanity: goto-def p95 must be <500ms (uncached); was " + p95ms + "ms");

@@ -144,6 +144,26 @@ public final class EcjContext implements AutoCloseable {
         return results;
     }
 
+    /// Eagerly parses up to [maxFiles] representative source files to populate
+    /// ECJ's internal `LookupEnvironment` + name-environment caches. Intended
+    /// to be called once on `initialize` from a virtual thread so the first
+    /// real hover / completion request lands on a warm compiler instead of
+    /// paying ECJ's first-touch cost.
+    ///
+    /// Returns the number of files actually parsed (may be smaller than
+    /// [maxFiles] when the workspace is small).
+    public int preWarm(int maxFiles) throws IOException {
+        if (maxFiles <= 0) return 0;
+        var files = collectJavaFiles(sourceRoots);
+        int n = Math.min(files.size(), maxFiles);
+        for (int i = 0; i < n; i++) {
+            Path p = files.get(i);
+            char[] content = contentOf(p, p.toUri());
+            parseWithBindings(p.toUri(), content);
+        }
+        return n;
+    }
+
     /// Parse [content] (the source of [uri]) into a DOM [CompilationUnit] with
     /// binding resolution enabled. Drives hover, goto-def, and completion.
     @SuppressWarnings("deprecation") // AST.JLS_Latest is intentionally the highest available

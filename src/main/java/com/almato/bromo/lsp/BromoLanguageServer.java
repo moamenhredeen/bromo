@@ -50,13 +50,15 @@ public final class BromoLanguageServer implements LanguageServer, LanguageClient
             Thread.ofVirtual().name("bromo-init", 1).start(() -> {
                 try {
                     workspace.attachToRoot(target);
+                    int warmed = workspace.preWarm();
                     LOG.log(System.Logger.Level.INFO,
                             () -> "workspace attached: " + target
                                     + " (sources="
                                     + workspace.projectModel().map(m -> m.sourceRoots().size()).orElse(0)
                                     + ", classpath="
                                     + workspace.projectModel().map(m -> m.classpath().size()).orElse(0)
-                                    + ", symbols=" + workspace.symbols().size() + ")");
+                                    + ", symbols=" + workspace.symbols().size()
+                                    + ", preWarmed=" + warmed + ")");
                 } catch (Exception e) {
                     LOG.log(System.Logger.Level.WARNING,
                             "workspace attach failed for " + target, e);
