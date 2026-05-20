@@ -8,9 +8,15 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.apache.maven.model.Model;
 import org.apache.maven.model.building.DefaultModelBuilder;
 import org.apache.maven.model.building.DefaultModelBuilderFactory;
@@ -20,16 +26,18 @@ import org.apache.maven.model.building.ModelBuildingResult;
 import org.apache.maven.repository.internal.MavenRepositorySystemUtils;
 import org.eclipse.aether.DefaultRepositorySystemSession;
 import org.eclipse.aether.RepositorySystem;
+import org.eclipse.aether.artifact.ArtifactType;
+import org.eclipse.aether.artifact.ArtifactTypeRegistry;
 import org.eclipse.aether.artifact.DefaultArtifact;
-import org.eclipse.aether.collection.CollectRequest;
 import org.eclipse.aether.connector.basic.BasicRepositoryConnectorFactory;
-import org.eclipse.aether.graph.Dependency;
 import org.eclipse.aether.impl.DefaultServiceLocator;
 import org.eclipse.aether.repository.LocalRepository;
 import org.eclipse.aether.repository.RemoteRepository;
+import org.eclipse.aether.resolution.ArtifactRequest;
+import org.eclipse.aether.resolution.ArtifactResolutionException;
 import org.eclipse.aether.resolution.ArtifactResult;
-import org.eclipse.aether.resolution.DependencyRequest;
-import org.eclipse.aether.resolution.DependencyResolutionException;
+import org.eclipse.aether.resolution.VersionRangeRequest;
+import org.eclipse.aether.resolution.VersionRangeResolutionException;
 import org.eclipse.aether.spi.connector.RepositoryConnectorFactory;
 import org.eclipse.aether.spi.connector.transport.TransporterFactory;
 import org.eclipse.aether.transport.file.FileTransporterFactory;
@@ -87,7 +95,16 @@ public final class MavenResolverProvider implements ProjectModelProvider {
                                              RepositorySystem system,
                                              DefaultRepositorySystemSession session,
                                              List<RemoteRepository> remotes) throws IOException {
-        DefaultModelBuilder builder = new DefaultModelBuilderFactory().newInstance();
+        return buildEffectiveModel(
+                pomFile,
+                new DefaultModelBuilderFactory().newInstance(),
+                new BromoModelResolver(session, system, remotes));
+    }
+
+    private static Model buildEffectiveModel(Path pomFile,
+                                             DefaultModelBuilder builder,
+                                             org.apache.maven.model.resolution.ModelResolver resolver)
+            throws IOException {
         DefaultModelBuildingRequest request = new DefaultModelBuildingRequest();
         request.setPomFile(pomFile.toFile());
         request.setProcessPlugins(false);
@@ -97,7 +114,7 @@ public final class MavenResolverProvider implements ProjectModelProvider {
         // resolve a <dependencyManagement> import. BromoModelResolver
         // fronts the same Aether RepositorySystem we use for the main
         // classpath resolution below.
-        request.setModelResolver(new BromoModelResolver(session, system, remotes));
+        request.setModelResolver(resolver.newCopy());
         try {
             ModelBuildingResult result = builder.build(request);
             return result.getEffectiveModel();
@@ -144,54 +161,146 @@ public final class MavenResolverProvider implements ProjectModelProvider {
     /// Resolves the main-jar classpath and attaches any sibling
     /// `-sources.jar` that already exists in the local Maven repository.
     ///
-    /// We deliberately **don't** kick off a second Aether resolution to
-    /// download missing source artifacts: that would double cold-load time,
-    /// which is the metric driving the R1 replacement trigger. Most users
-    /// already have sources cached locally (IDE auto-fetch, or a one-shot
-    /// `mvn dependency:sources`); when they don't, goto-def into that
-    /// library falls back to empty until on-demand fetching lands.
+    /// We walk transitives ourselves rather than calling
+    /// `system.resolveDependencies(...)`. Aether's `DefaultArtifactDescriptorReader`
+    /// silently returns *zero* dependencies for any POM whose dependencies
+    /// rely on a parent's `<dependencyManagement>` for versioning — a real
+    /// codebase shape (the smoke target's `branch-core` had unversioned
+    /// `<dependency>` entries supplied by a `mml-middleware` parent). The
+    /// failure was silent: `getExceptions()` was empty, the descriptor
+    /// just had no deps, and entire transitive subtrees dropped off the
+    /// classpath even though the artifacts and POMs were present in
+    /// `~/.m2`.
+    ///
+    /// Build the effective POM ourselves via [BromoModelResolver] (which
+    /// is already known to work — `attachToRoot` uses the same builder
+    /// for the root POM) and BFS the dependency graph. Aether is reduced
+    /// to a per-artifact file lookup, which is fast and reliable.
     private static List<ClasspathEntry> resolveClasspath(
             Model model,
             RepositorySystem system,
             DefaultRepositorySystemSession session,
             List<RemoteRepository> remotes) throws IOException {
 
-        CollectRequest collect = new CollectRequest();
-        for (org.apache.maven.model.Dependency dep : model.getDependencies()) {
-            collect.addDependency(new Dependency(toAether(dep), scopeOf(dep)));
-        }
-        collect.setRepositories(remotes);
+        ArtifactTypeRegistry registry = session.getArtifactTypeRegistry();
+        Set<String> seen = new HashSet<>();
+        Deque<org.apache.maven.model.Dependency> queue = new ArrayDeque<>();
 
-        // Partial-failure tolerance: a project that uses private deps from a
-        // Nexus/Artifactory not in settings.xml will throw
-        // DependencyResolutionException, but the exception still carries a
-        // partially-resolved result. Surface that — the LSP is more useful
-        // with 80% of the classpath wired than with nothing wired at all.
-        // Fully-failed resolutions (no artifacts at all) still throw.
-        var request = new DependencyRequest(collect, null);
-        org.eclipse.aether.resolution.DependencyResult result;
-        try {
-            result = system.resolveDependencies(session, request);
-        } catch (DependencyResolutionException e) {
-            result = e.getResult();
-            if (result == null) {
-                throw new IOException("dependency resolution failed for "
-                        + model.getGroupId() + ":" + model.getArtifactId(), e);
-            }
-            System.getLogger(MavenResolverProvider.class.getName()).log(
-                    System.Logger.Level.WARNING,
-                    () -> "partial dependency resolution: " + e.getMessage());
+        // Seed: all direct deps of the root project, every scope. Transitive
+        // expansion below is scope-restricted; the root itself can pull in
+        // test deps so the LSP works in test code too.
+        for (var d : model.getDependencies()) {
+            if (seen.add(key(d))) queue.add(d);
         }
-        List<ClasspathEntry> classpath = new ArrayList<>();
-        for (ArtifactResult ar : result.getArtifactResults()) {
-            if (!ar.isResolved()) continue;
-            File f = ar.getArtifact().getFile();
-            if (f != null) {
-                Path binary = f.toPath();
+
+        // Reuse one model builder + resolver + per-pom cache for the whole
+        // walk. Without this, expanding a 391-dep tree re-builds every
+        // parent POM hundreds of times (~70s on the smoke target). The
+        // cache is sound because POMs in the local Maven repo are
+        // effectively immutable for the duration of one load() call.
+        DefaultModelBuilder modelBuilder = new DefaultModelBuilderFactory().newInstance();
+        BromoModelResolver modelResolver = new BromoModelResolver(session, system, remotes);
+        Map<Path, Model> modelCache = new HashMap<>();
+
+        var classpath = new ArrayList<ClasspathEntry>();
+        var logger = System.getLogger(MavenResolverProvider.class.getName());
+
+        while (!queue.isEmpty()) {
+            var dep = queue.poll();
+            if (isOptional(dep)) continue;
+
+            var aetherArtifact = toAether(dep, registry);
+
+            // Resolve the jar/test-jar file.
+            Path binary = resolveFile(system, session, remotes, aetherArtifact);
+            if (binary != null) {
                 classpath.add(new ClasspathEntry(binary, siblingSourcesJar(binary)));
+            } else {
+                logger.log(System.Logger.Level.WARNING,
+                        () -> "missing artifact: " + aetherArtifact);
+            }
+
+            // Expand transitives via our own ModelBuilder, which respects
+            // <parent>/<dependencyManagement> properly.
+            var pomArtifact = new DefaultArtifact(
+                    aetherArtifact.getGroupId(),
+                    aetherArtifact.getArtifactId(),
+                    "", "pom",
+                    aetherArtifact.getVersion());
+            Path pomFile = resolveFile(system, session, remotes, pomArtifact);
+            if (pomFile == null) continue;
+
+            Model depModel = modelCache.get(pomFile);
+            if (depModel == null) {
+                try {
+                    depModel = buildEffectiveModel(pomFile, modelBuilder, modelResolver);
+                } catch (IOException e) {
+                    logger.log(System.Logger.Level.WARNING,
+                            () -> "failed to expand transitives of " + aetherArtifact + ": " + e.getMessage());
+                    continue;
+                }
+                modelCache.put(pomFile, depModel);
+            }
+            for (var sub : depModel.getDependencies()) {
+                if (!isTransitiveScope(sub.getScope())) continue;
+                if (isOptional(sub)) continue;
+                if (seen.add(key(sub))) queue.add(sub);
             }
         }
         return List.copyOf(classpath);
+    }
+
+    private static Path resolveFile(RepositorySystem system,
+                                    DefaultRepositorySystemSession session,
+                                    List<RemoteRepository> remotes,
+                                    org.eclipse.aether.artifact.Artifact artifact) {
+        org.eclipse.aether.artifact.Artifact toResolve = artifact;
+        // Maven version ranges (e.g. lsp4j's gson dep "[2.9.1,3.0)") need to
+        // be reduced to a concrete version before artifact resolution.
+        String v = artifact.getVersion();
+        if (v != null && (v.startsWith("[") || v.startsWith("("))) {
+            try {
+                var rr = system.resolveVersionRange(session,
+                        new VersionRangeRequest(artifact, remotes, null));
+                if (rr.getHighestVersion() == null) return null;
+                toResolve = new DefaultArtifact(
+                        artifact.getGroupId(), artifact.getArtifactId(),
+                        artifact.getClassifier(), artifact.getExtension(),
+                        rr.getHighestVersion().toString());
+            } catch (VersionRangeResolutionException e) {
+                return null;
+            }
+        }
+        try {
+            ArtifactResult result = system.resolveArtifact(session,
+                    new ArtifactRequest(toResolve, remotes, null));
+            File f = result.getArtifact().getFile();
+            return f != null ? f.toPath() : null;
+        } catch (ArtifactResolutionException e) {
+            return null;
+        }
+    }
+
+    private static String key(org.apache.maven.model.Dependency d) {
+        return d.getGroupId() + ":" + d.getArtifactId() + ":"
+                + (d.getClassifier() == null ? "" : d.getClassifier()) + ":"
+                + (d.getType() == null ? "jar" : d.getType());
+    }
+
+    private static boolean isOptional(org.apache.maven.model.Dependency d) {
+        return Boolean.parseBoolean(d.getOptional());
+    }
+
+    /// Maven scope rules pruned to what an LSP cares about: when walking
+    /// transitives of a *compile*-reachable dep, follow compile / runtime
+    /// (provided is intentionally included — needed for IDE-time
+    /// resolution of e.g. `javax.servlet-api`). Test scope is workspace-only.
+    private static boolean isTransitiveScope(String scope) {
+        if (scope == null || scope.isEmpty()) return true; // default = compile
+        return switch (scope) {
+            case "compile", "runtime", "provided" -> true;
+            default -> false;
+        };
     }
 
     private static Optional<Path> siblingSourcesJar(Path binary) {
@@ -202,19 +311,37 @@ public final class MavenResolverProvider implements ProjectModelProvider {
         return Files.isRegularFile(sibling) ? Optional.of(sibling) : Optional.empty();
     }
 
-    private static org.eclipse.aether.artifact.Artifact toAether(org.apache.maven.model.Dependency dep) {
-        String extension = dep.getType() != null ? dep.getType() : "jar";
-        String classifier = dep.getClassifier() != null ? dep.getClassifier() : "";
+    /// Map a Maven [Dependency] to an Aether [Artifact], respecting Maven's
+    /// type → (extension, classifier) registry.
+    ///
+    /// Maven `<type>` is not a file extension. `test-jar` maps to
+    /// `(extension=jar, classifier=tests)`; `javadoc` to `(jar, javadoc)`;
+    /// `ejb-client` to `(jar, client)`; etc. The previous version passed the
+    /// type string directly as the extension, so any dep using a Maven type
+    /// alias would be requested as `groupId:artifactId:test-jar:version` and
+    /// fail to resolve — which then cascaded: branch-core couldn't be
+    /// traversed past the broken sibling, dropping its entire compile
+    /// subtree (including the main `mml-base.jar` that contained
+    /// `OrderService`) from the classpath.
+    private static org.eclipse.aether.artifact.Artifact toAether(
+            org.apache.maven.model.Dependency dep, ArtifactTypeRegistry registry) {
+        String typeId = dep.getType() != null ? dep.getType() : "jar";
+        ArtifactType type = registry != null ? registry.get(typeId) : null;
+
+        String extension = type != null ? type.getExtension() : typeId;
+        String classifier;
+        if (dep.getClassifier() != null && !dep.getClassifier().isEmpty()) {
+            classifier = dep.getClassifier();
+        } else {
+            classifier = type != null ? type.getClassifier() : "";
+        }
+
         return new DefaultArtifact(
                 dep.getGroupId(),
                 dep.getArtifactId(),
                 classifier,
                 extension,
                 dep.getVersion());
-    }
-
-    private static String scopeOf(org.apache.maven.model.Dependency dep) {
-        return dep.getScope() != null ? dep.getScope() : "compile";
     }
 
     // ---- Aether bootstrap --------------------------------------------------
