@@ -12,6 +12,8 @@ import com.almato.bromo.symbol.SymbolIndex;
 import com.almato.bromo.symbol.WorkspaceScanner;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /// Root container for bromo's workspace state.
@@ -83,7 +85,18 @@ public final class Workspace {
         this.library = new LibrarySourceProvider(model.classpath(), cacheRoot.resolve("lib"));
         this.sources = new SourceResolver(jdk, library);
 
-        new WorkspaceScanner().scanInto(symbols, model.sourceRoots());
+        // Symbol index covers our own sources plus any sibling modules in the
+        // same Maven reactor — without this, goto-def into e.g. a sibling
+        // `mml-base` type fails when no `-sources.jar` is attached for the
+        // dependency. Sibling sources are NOT added to the ECJ source roots;
+        // that would force the compiler to drag the whole reactor into every
+        // diagnostic pass. ECJ continues to resolve sibling types from their
+        // jars on the classpath; the symbol index is only consulted for
+        // navigation + javadoc rendering.
+        var scanRoots = new ArrayList<Path>(model.sourceRoots());
+        List<Path> reactorSiblings = MavenResolverProvider.discoverReactorSiblingSources(root);
+        scanRoots.addAll(reactorSiblings);
+        new WorkspaceScanner().scanInto(symbols, scanRoots);
     }
 
     /// Eagerly parses a handful of source files so the first real LSP request

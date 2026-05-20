@@ -6,8 +6,13 @@ import com.almato.bromo.project.ProjectModelProvider;
 import com.almato.bromo.project.maven.MavenProjectModel;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamException;
+import javax.xml.stream.XMLStreamReader;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -57,6 +62,79 @@ public final class MavenResolverProvider implements ProjectModelProvider {
     @Override
     public boolean supports(Path workspaceRoot) {
         return Files.isRegularFile(workspaceRoot.resolve("pom.xml"));
+    }
+
+    /// Walks up from [workspaceRoot] to find a parent `pom.xml` whose
+    /// `<modules>` block lists [workspaceRoot] as a reactor module. When
+    /// found, returns the `src/main/java` and `src/test/java` directories
+    /// of every *other* module in that reactor.
+    ///
+    /// Used by [com.almato.bromo.workspace.Workspace] to populate the
+    /// symbol index across the whole multi-module checkout when only one
+    /// module is opened in the editor. Without this, goto-def into a
+    /// sibling module's type falls through to the binary jar — which
+    /// often has no `-sources.jar` attachment (private snapshots, locally
+    /// installed jars from `mvn install`) and leaves the user with "no
+    /// location found".
+    ///
+    /// Stays a quick StAX parse — driving the full Maven model builder
+    /// for every parent walked would double `attachToRoot` time. We don't
+    /// recurse beyond one level: a reactor parent of a reactor parent is
+    /// the wrong scope to add as a symbol-index root.
+    public static List<Path> discoverReactorSiblingSources(Path workspaceRoot) {
+        Path parent = workspaceRoot.toAbsolutePath().normalize().getParent();
+        if (parent == null) return List.of();
+        Path parentPom = parent.resolve("pom.xml");
+        if (!Files.isRegularFile(parentPom)) return List.of();
+
+        List<String> modules = readModules(parentPom);
+        String selfName = workspaceRoot.toAbsolutePath().normalize().getFileName().toString();
+        if (!modules.contains(selfName)) return List.of();
+
+        var roots = new ArrayList<Path>();
+        for (String module : modules) {
+            if (module.equals(selfName)) continue;
+            Path siblingDir = parent.resolve(module).normalize();
+            Path mainSrc = siblingDir.resolve("src/main/java");
+            Path testSrc = siblingDir.resolve("src/test/java");
+            if (Files.isDirectory(mainSrc)) roots.add(mainSrc);
+            if (Files.isDirectory(testSrc)) roots.add(testSrc);
+        }
+        return List.copyOf(roots);
+    }
+
+    /// Quick StAX-only `<module>` extractor. Skips profile-activated modules
+    /// (`<profile><modules>`) intentionally — they're rarely needed for the
+    /// LSP symbol index and would require profile evaluation we don't do.
+    private static List<String> readModules(Path pomFile) {
+        var result = new ArrayList<String>();
+        try (InputStream in = Files.newInputStream(pomFile)) {
+            XMLStreamReader r = XMLInputFactory.newDefaultFactory().createXMLStreamReader(in);
+            int depth = 0;
+            int profileDepth = -1;
+            int modulesDepth = -1;
+            while (r.hasNext()) {
+                int e = r.next();
+                if (e == XMLStreamConstants.START_ELEMENT) {
+                    depth++;
+                    String name = r.getLocalName();
+                    if (name.equals("profile")) profileDepth = depth;
+                    else if (name.equals("modules") && profileDepth < 0) modulesDepth = depth;
+                    else if (name.equals("module") && modulesDepth > 0 && depth == modulesDepth + 1) {
+                        String text = r.getElementText().trim();
+                        if (!text.isEmpty()) result.add(text);
+                        depth--; // getElementText consumed the END_ELEMENT
+                    }
+                } else if (e == XMLStreamConstants.END_ELEMENT) {
+                    if (modulesDepth == depth) modulesDepth = -1;
+                    if (profileDepth == depth) profileDepth = -1;
+                    depth--;
+                }
+            }
+        } catch (IOException | XMLStreamException ignored) {
+            // Best-effort. Returning {} silently degrades to single-module mode.
+        }
+        return result;
     }
 
     @Override
