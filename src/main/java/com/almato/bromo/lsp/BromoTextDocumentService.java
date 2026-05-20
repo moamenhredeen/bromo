@@ -118,7 +118,8 @@ public final class BromoTextDocumentService implements TextDocumentService {
             CharSequence content = contentOf(uri);
             if (content == null) return null;
             int offset = Adapters.offset(content, params.getPosition());
-            var feature = new HoverFeature(ecj, workspace.files(), sources, workspace.symbols());
+            var feature = new HoverFeature(ecj, workspace.files(), sources, workspace.symbols(),
+                    workspace.queries().orElse(null));
             return feature.hover(uri, offset, CancelToken.never())
                     .map(r -> Adapters.toLspHover(r, content))
                     .orElse(null);
@@ -138,7 +139,8 @@ public final class BromoTextDocumentService implements TextDocumentService {
             CharSequence content = contentOf(uri);
             if (content == null) return Either.<List<? extends Location>, List<? extends LocationLink>>forLeft(List.of());
             int offset = Adapters.offset(content, params.getPosition());
-            var feature = new DefinitionFeature(ecj, workspace.files(), workspace.symbols(), sources);
+            var feature = new DefinitionFeature(ecj, workspace.files(), workspace.symbols(), sources,
+                    workspace.queries().orElse(null));
             var result = feature.definition(uri, offset, CancelToken.never());
             if (result.isEmpty()) {
                 return Either.<List<? extends Location>, List<? extends LocationLink>>forLeft(List.of());

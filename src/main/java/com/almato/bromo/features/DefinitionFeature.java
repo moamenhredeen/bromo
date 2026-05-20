@@ -2,6 +2,7 @@ package com.almato.bromo.features;
 
 import com.almato.bromo.compiler.EcjContext;
 import com.almato.bromo.compiler.SourceResolver;
+import com.almato.bromo.query.QueryEngine;
 import com.almato.bromo.symbol.SymbolIndex;
 import com.almato.bromo.symbol.SymbolKind;
 import com.almato.bromo.util.CancelToken;
@@ -49,12 +50,19 @@ public final class DefinitionFeature {
     private final FileStore files;
     private final SymbolIndex symbols;
     private final SourceResolver sources;
+    private final QueryEngine queries;
 
     public DefinitionFeature(EcjContext ecj, FileStore files, SymbolIndex symbols, SourceResolver sources) {
+        this(ecj, files, symbols, sources, null);
+    }
+
+    public DefinitionFeature(EcjContext ecj, FileStore files, SymbolIndex symbols,
+                             SourceResolver sources, QueryEngine queries) {
         this.ecj = ecj;
         this.files = files;
         this.symbols = symbols;
         this.sources = sources;
+        this.queries = queries;
     }
 
     public Optional<DefinitionResult> definition(URI uri, int offset, CancelToken cancel) {
@@ -62,7 +70,7 @@ public final class DefinitionFeature {
         if (content == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
-        CompilationUnit cu = ecj.parseWithBindings(uri, content);
+        CompilationUnit cu = parsedAst(uri, content);
         if (cu == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
@@ -121,6 +129,14 @@ public final class DefinitionFeature {
             }
         }
         return Optional.empty();
+    }
+
+    private CompilationUnit parsedAst(URI uri, char[] content) {
+        if (queries != null) {
+            var hit = queries.cachedParsedAst(uri);
+            if (hit.isPresent()) return hit.get();
+        }
+        return ecj.parseWithBindings(uri, content);
     }
 
     private Optional<char[]> readContent(URI uri) {

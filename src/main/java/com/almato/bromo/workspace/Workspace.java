@@ -7,6 +7,7 @@ import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.project.ProjectModel;
 import com.almato.bromo.project.maven.MavenProjectModel;
 import com.almato.bromo.project.maven.resolver.MavenResolverProvider;
+import com.almato.bromo.query.QueryEngine;
 import com.almato.bromo.symbol.SymbolIndex;
 import com.almato.bromo.symbol.WorkspaceScanner;
 import java.io.IOException;
@@ -25,6 +26,7 @@ public final class Workspace {
     private final SymbolIndex symbols = new SymbolIndex();
     private volatile ProjectModel projectModel;
     private volatile EcjContext ecj;
+    private volatile QueryEngine queries;
     private volatile SourceResolver sources;
     private volatile JdkProvider jdk;
     private volatile LibrarySourceProvider library;
@@ -53,6 +55,10 @@ public final class Workspace {
         this.ecj = ecj;
     }
 
+    public Optional<QueryEngine> queries() {
+        return Optional.ofNullable(queries);
+    }
+
     public Optional<SourceResolver> sources() {
         return Optional.ofNullable(sources);
     }
@@ -65,7 +71,9 @@ public final class Workspace {
         if (!provider.supports(root)) return;
         var model = (MavenProjectModel) provider.load(root);
         setProjectModel(model);
-        setEcj(new EcjContext(fileStore, model.sourceRoots(), model.classpathBinaries()));
+        var ctx = new EcjContext(fileStore, model.sourceRoots(), model.classpathBinaries());
+        setEcj(ctx);
+        this.queries = new QueryEngine(fileStore, ctx);
 
         // Source-attachment cache lives under target/ so `mvn clean` wipes it.
         // We do not put it under .git or the workspace root proper — it's
@@ -81,6 +89,7 @@ public final class Workspace {
     /// Releases held resources (zip filesystem handles, the compile engine).
     /// Idempotent.
     public void close() {
+        if (queries != null) queries.close();
         if (jdk != null) jdk.close();
         if (library != null) library.close();
         if (ecj != null) {

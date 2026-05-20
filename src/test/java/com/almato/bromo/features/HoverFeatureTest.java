@@ -9,6 +9,7 @@ import com.almato.bromo.compiler.SourceResolver;
 import com.almato.bromo.jdk.JdkProvider;
 import com.almato.bromo.project.maven.MavenProjectModel;
 import com.almato.bromo.project.maven.resolver.MavenResolverProvider;
+import com.almato.bromo.query.QueryEngine;
 import com.almato.bromo.util.CancelToken;
 import com.almato.bromo.workspace.FileStore;
 import java.io.IOException;
@@ -200,6 +201,41 @@ final class HoverFeatureTest {
         assertTrue(md.length() > 300,
                 "javadoc should expand the hover output; was only "
                         + md.length() + " chars: " + md);
+    }
+
+    @Test
+    @DisplayName("repeated hover on the same open document hits the query cache")
+    void hoverHitsQueryCache(@TempDir Path tmp) throws IOException {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        var file = src.resolve("Foo.java");
+        var source = """
+                package example;
+                public class Foo {
+                    Foo other;
+                }
+                """;
+        Files.writeString(file, source, StandardCharsets.UTF_8);
+
+        var files = new FileStore();
+        files.openDocument(file.toUri(), "java", source);
+        var ctx = new EcjContext(files, List.of(tmp.resolve("src/main/java")), List.of());
+        try (var queries = new QueryEngine(files, ctx)) {
+            var hover = new HoverFeature(ctx, files, sourceResolver(tmp),
+                    new com.almato.bromo.symbol.SymbolIndex(), queries);
+
+            int offset = source.indexOf("Foo other");
+            var first = hover.hover(file.toUri(), offset, CancelToken.never());
+            assertTrue(first.isPresent());
+            int cachedAfterFirst = queries.cachedSize();
+            assertTrue(cachedAfterFirst == 1,
+                    "expected exactly one cached AST after first hover, got " + cachedAfterFirst);
+
+            var second = hover.hover(file.toUri(), offset, CancelToken.never());
+            assertTrue(second.isPresent());
+            assertTrue(queries.cachedSize() == 1, "second hover should reuse cache");
+            assertTrue(first.get().markdown().equals(second.get().markdown()),
+                    "cached AST should yield identical hover output");
+        }
     }
 
     private static SourceResolver sourceResolver(Path tmp) {

@@ -3,6 +3,7 @@ package com.almato.bromo.features;
 import com.almato.bromo.compiler.EcjContext;
 import com.almato.bromo.compiler.ResolvedDeclaration;
 import com.almato.bromo.compiler.SourceResolver;
+import com.almato.bromo.query.QueryEngine;
 import com.almato.bromo.symbol.Descriptor;
 import com.almato.bromo.symbol.SymbolIndex;
 import com.almato.bromo.symbol.SymbolKind;
@@ -46,12 +47,19 @@ public final class HoverFeature {
     private final FileStore files;
     private final SourceResolver sources;
     private final SymbolIndex symbols;
+    private final QueryEngine queries;
 
     public HoverFeature(EcjContext ecj, FileStore files, SourceResolver sources, SymbolIndex symbols) {
+        this(ecj, files, sources, symbols, null);
+    }
+
+    public HoverFeature(EcjContext ecj, FileStore files, SourceResolver sources,
+                        SymbolIndex symbols, QueryEngine queries) {
         this.ecj = ecj;
         this.files = files;
         this.sources = sources;
         this.symbols = symbols;
+        this.queries = queries;
     }
 
     public Optional<HoverResult> hover(URI uri, int offset, CancelToken cancel) {
@@ -59,7 +67,7 @@ public final class HoverFeature {
         if (content == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
-        CompilationUnit cu = ecj.parseWithBindings(uri, content);
+        CompilationUnit cu = parsedAst(uri, content);
         if (cu == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
@@ -132,7 +140,7 @@ public final class HoverFeature {
         char[] declaringContent = readContent(declaringUri).orElse(null);
         if (declaringContent == null) return "";
 
-        CompilationUnit declaringCu = ecj.parseWithBindings(declaringUri, declaringContent);
+        CompilationUnit declaringCu = parsedAst(declaringUri, declaringContent);
         if (declaringCu == null) return "";
 
         BodyDeclaration target = findTargetBody(declaringCu, binding, simpleName);
@@ -209,6 +217,16 @@ public final class HoverFeature {
             }
         }
         return null;
+    }
+
+    /// Returns a binding-resolved AST, using the [QueryEngine] cache for open
+    /// documents and falling through to a direct ECJ parse for closed files.
+    private CompilationUnit parsedAst(URI uri, char[] content) {
+        if (queries != null) {
+            var hit = queries.cachedParsedAst(uri);
+            if (hit.isPresent()) return hit.get();
+        }
+        return ecj.parseWithBindings(uri, content);
     }
 
     private Optional<char[]> readContent(URI uri) {
