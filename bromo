@@ -2,11 +2,18 @@
 # ------------------------------------------------------------------
 # bromo launcher (POSIX).
 # Wraps `java -jar target/bromo.jar --stdio` with the JVM flags the
-# server expects (ZGC, --enable-preview for StructuredTaskScope/ScopedValue).
+# server expects:
+#  --enable-preview  StructuredTaskScope / ScopedValue (Java 25 preview)
+#  -XX:+UseZGC       Generational ZGC (default flavour in 25)
+#  -XX:AOTMode=auto  JEP 514 one-step AOT: cache produced on first run,
+#                    consumed on every subsequent run.
+#  -XX:AOTCache=…    Cache path. Lives under target/ so `mvn clean`
+#                    drops it.
 # ------------------------------------------------------------------
 set -e
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 JAR="$SCRIPT_DIR/target/bromo.jar"
+AOT_CACHE="$SCRIPT_DIR/target/bromo.aot"
 
 if [ -z "${JAVA_HOME:-}" ]; then
     if [ -d "$HOME/.jdks/temurin-25.0.3" ]; then
@@ -27,4 +34,6 @@ JAVA_BIN="${JAVA_HOME:+$JAVA_HOME/bin/}java"
 exec "$JAVA_BIN" \
     --enable-preview \
     -XX:+UseZGC \
+    -XX:AOTMode=auto \
+    -XX:AOTCache="$AOT_CACHE" \
     -jar "$JAR" "$@"
