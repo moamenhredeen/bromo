@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.eclipse.jdt.core.JavaCore;
 import org.eclipse.jdt.core.dom.AST;
@@ -59,10 +60,20 @@ public final class EcjContext implements AutoCloseable {
     private Map<Path, Long> lastSignatures = Map.of();
     private Map<URI, List<Diagnostic>> lastDiagnostics = Map.of();
 
+    /// `true` when a change has been observed since the last compile.
+    /// Open-document edits flip this via the [FileStore] change listener;
+    /// external edits flip it via [#markDirty]. While `false`, the
+    /// fast path in [#compileWorkspace] skips the filesystem walk + per-file
+    /// signature probe — dropping cache-hit cost from ~10ms to ~µs on a
+    /// 100-file workspace.
+    private volatile boolean compileDirty = true;
+    private final Consumer<URI> dirtyListener = uri -> compileDirty = true;
+
     public EcjContext(FileStore fileStore, List<Path> sourceRoots, List<Path> classpath) {
         this.fileStore = fileStore;
         this.sourceRoots = List.copyOf(sourceRoots);
         this.classpath = List.copyOf(classpath);
+        fileStore.addChangeListener(dirtyListener);
     }
 
     @Override
@@ -72,6 +83,18 @@ public final class EcjContext implements AutoCloseable {
             lastSignatures = Map.of();
             lastDiagnostics = Map.of();
         }
+        fileStore.removeChangeListener(dirtyListener);
+    }
+
+    /// Flag the compile cache as potentially stale. The next
+    /// [#compileWorkspace] will re-walk the source tree and compare
+    /// signatures instead of taking the fast path.
+    ///
+    /// Intended for the LSP layer to call on `workspace/didChangeWatchedFiles`
+    /// — open-document edits already mark the context dirty through the
+    /// [FileStore] change listener.
+    public void markDirty() {
+        compileDirty = true;
     }
 
     public List<Path> sourceRoots() { return sourceRoots; }
@@ -79,14 +102,27 @@ public final class EcjContext implements AutoCloseable {
     public FileStore  files()       { return fileStore; }
 
     /// Compile every `.java` file under the configured source roots and
-    /// return diagnostics keyed by source URI. Returns the **previous** result
-    /// directly when every file's signature matches the last compile.
+    /// return diagnostics keyed by source URI.
+    ///
+    /// Three-tier short-circuit:
+    /// 1. **Dirty-flag fast path** — no edits since the last compile?
+    ///    Return the cached map without touching the filesystem.
+    /// 2. **Signature fast path** — file list + per-file size+mtime match the
+    ///    previous compile? Return the cached map and clear the dirty flag.
+    /// 3. **Slow path** — recompile, store the new map + signatures.
     public synchronized Map<URI, List<Diagnostic>> compileWorkspace() throws IOException {
+        if (!compileDirty) {
+            synchronized (stateLock) {
+                if (!lastDiagnostics.isEmpty()) return lastDiagnostics;
+            }
+        }
+
         var files = collectJavaFiles(sourceRoots);
         var signatures = computeSignatures(files);
 
         synchronized (stateLock) {
             if (!lastDiagnostics.isEmpty() && signatures.equals(lastSignatures)) {
+                compileDirty = false;
                 return lastDiagnostics;
             }
         }
@@ -96,6 +132,7 @@ public final class EcjContext implements AutoCloseable {
         synchronized (stateLock) {
             this.lastSignatures = signatures;
             this.lastDiagnostics = fresh;
+            compileDirty = false;
         }
         return fresh;
     }

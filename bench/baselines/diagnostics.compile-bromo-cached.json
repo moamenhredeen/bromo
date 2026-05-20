@@ -1,8 +1,8 @@
 {
   "name": "diagnostics.compile-bromo-cached",
-  "p50ns": 7250800,
-  "p95ns": 10739300,
-  "p99ns": 11513100,
+  "p50ns": 300,
+  "p95ns": 500,
+  "p99ns": 11700,
   "samples": 50,
-  "recordedAt": "2026-05-20T21:48:11.616231900Z"
+  "recordedAt": "2026-05-20T22:29:29.935276700Z"
 }

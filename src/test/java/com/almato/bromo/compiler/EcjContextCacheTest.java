@@ -36,8 +36,8 @@ final class EcjContextCacheTest {
     }
 
     @Test
-    @DisplayName("editing a closed file invalidates the cache")
-    void diskEditInvalidatesCache(@TempDir Path tmp) throws Exception {
+    @DisplayName("disk edit + markDirty invalidates the cache")
+    void diskEditWithMarkDirtyInvalidatesCache(@TempDir Path tmp) throws Exception {
         var src = mkdirs(tmp.resolve("src/main/java/example"));
         var file = src.resolve("Bar.java");
         Files.writeString(file, """
@@ -48,19 +48,50 @@ final class EcjContextCacheTest {
         try (var ctx = new EcjContext(new FileStore(),
                 List.of(tmp.resolve("src/main/java")), List.of())) {
             var first = ctx.compileWorkspace();
-            // Bump mtime + content so signatureOf changes.
+            // Bump mtime + content so the eventual signature comparison
+            // sees a change.
             Thread.sleep(10);
             Files.writeString(file, """
                     package example;
                     public class Bar { int x = "no"; }
                     """, StandardCharsets.UTF_8);
+            // External (non-FileStore) edits are the LSP layer's responsibility
+            // to surface via didChangeWatchedFiles → markDirty().
+            ctx.markDirty();
             var second = ctx.compileWorkspace();
             assertNotSame(first, second,
-                    "edit should invalidate cache and trigger fresh compile");
+                    "edit + markDirty should invalidate cache and trigger fresh compile");
             assertTrue(second.values().stream()
                             .anyMatch(diags -> diags.stream()
                                     .anyMatch(d -> d.severity() == DiagnosticSeverity.ERROR)),
                     "expected an ERROR diagnostic after the breaking edit");
+        }
+    }
+
+    @Test
+    @DisplayName("disk edit without markDirty returns the cached map — contract is explicit")
+    void diskEditWithoutMarkDirtyReturnsCache(@TempDir Path tmp) throws Exception {
+        var src = mkdirs(tmp.resolve("src/main/java/example"));
+        var file = src.resolve("Quux.java");
+        Files.writeString(file, """
+                package example;
+                public class Quux { int x; }
+                """, StandardCharsets.UTF_8);
+
+        try (var ctx = new EcjContext(new FileStore(),
+                List.of(tmp.resolve("src/main/java")), List.of())) {
+            var first = ctx.compileWorkspace();
+            Thread.sleep(10);
+            Files.writeString(file, """
+                    package example;
+                    public class Quux { int x = "no"; }
+                    """, StandardCharsets.UTF_8);
+            // No markDirty → the dirty-flag fast path returns the cached
+            // result. This is the v0 contract: external file edits do not
+            // invalidate without explicit notification.
+            var second = ctx.compileWorkspace();
+            assertSame(first, second,
+                    "disk edit alone (no markDirty) must not invalidate the dirty-flag cache");
         }
     }
 

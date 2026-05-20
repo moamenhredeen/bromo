@@ -42,17 +42,17 @@ final class DiagnosticsBench {
                     + "p50=" + (cachedResult.p50ns() / 1_000L) + "µs "
                     + "p95=" + cachedP95us + "µs");
 
-            // 50-sample filesystem walk + per-file mtime probe — env-dependent.
-            Baseline.checkRegression("diagnostics.compile-bromo-cached", cachedResult, 100.0);
+            // Dirty-flag cache hit: sub-µs regime, dominated by timer jitter.
+            Baseline.checkRegression("diagnostics.compile-bromo-cached", cachedResult, 500.0);
 
             assertTrue(coldElapsedMs < 5_000,
                     "M4 sanity: cold workspace compile must be <5s; was " + coldElapsedMs + "ms");
-            // M4.5: cache hit costs one filesystem walk + per-file signature
-            // probe (size+mtime, or text.hashCode() for open buffers). 25ms
-            // covers bromo's tree today; the regression check on the baseline
-            // catches drift before it eats the latency budget.
-            assertTrue(cachedP95us < 25_000,
-                    "M4.5: cached compile p95 must be <25ms; was " + cachedP95us + "µs");
+            // Dirty-flag short-circuit: cache-hit path now skips the
+            // filesystem walk entirely → cache hit is sub-µs in practice.
+            // 1ms cap leaves room for GC / scheduler jitter while still
+            // catching a regression that brings back the walk.
+            assertTrue(cachedP95us < 1_000,
+                    "M4.5/M5: cached compile p95 must be <1ms; was " + cachedP95us + "µs");
         }
     }
 }

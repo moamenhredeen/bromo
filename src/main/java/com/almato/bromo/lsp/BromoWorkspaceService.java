@@ -7,12 +7,11 @@ import org.eclipse.lsp4j.services.WorkspaceService;
 
 /// LSP4J adapter for workspace-level requests.
 ///
-/// Method bodies are filled in as milestones land:
-/// - M2 — project-model loading on initial open (workspace folders from `initialize`).
-/// - M9 — `didChangeConfiguration`, `didChangeWatchedFiles`, file-watch reactions.
+/// `didChangeWatchedFiles` flips the compile-cache dirty bit so the next
+/// `compileWorkspace` re-checks signatures instead of taking the fast path.
+/// Full `didChangeConfiguration` handling is M9.
 public final class BromoWorkspaceService implements WorkspaceService {
 
-    @SuppressWarnings("unused") // wired up as features land
     private final Workspace workspace;
 
     public BromoWorkspaceService(Workspace workspace) {
@@ -26,6 +25,6 @@ public final class BromoWorkspaceService implements WorkspaceService {
 
     @Override
     public void didChangeWatchedFiles(DidChangeWatchedFilesParams params) {
-        // M9
+        workspace.ecj().ifPresent(ctx -> ctx.markDirty());
     }
 }
