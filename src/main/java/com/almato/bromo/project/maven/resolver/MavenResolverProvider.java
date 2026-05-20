@@ -59,11 +59,12 @@ public final class MavenResolverProvider implements ProjectModelProvider {
     @Override
     public ProjectModel load(Path workspaceRoot) throws IOException {
         Path pomFile = workspaceRoot.resolve("pom.xml");
-        Model model = buildEffectiveModel(pomFile);
 
         RepositorySystem system = newRepositorySystem();
         DefaultRepositorySystemSession session = newSession(system);
         List<RemoteRepository> remotes = List.of(centralRepository());
+
+        Model model = buildEffectiveModel(pomFile, system, session, remotes);
 
         List<ClasspathEntry> classpath = resolveClasspath(model, system, session, remotes);
         List<Path> sourceRoots = computeSourceRoots(workspaceRoot, model);
@@ -82,12 +83,21 @@ public final class MavenResolverProvider implements ProjectModelProvider {
 
     // ---- effective POM -----------------------------------------------------
 
-    private static Model buildEffectiveModel(Path pomFile) throws IOException {
+    private static Model buildEffectiveModel(Path pomFile,
+                                             RepositorySystem system,
+                                             DefaultRepositorySystemSession session,
+                                             List<RemoteRepository> remotes) throws IOException {
         DefaultModelBuilder builder = new DefaultModelBuilderFactory().newInstance();
         DefaultModelBuildingRequest request = new DefaultModelBuildingRequest();
         request.setPomFile(pomFile.toFile());
         request.setProcessPlugins(false);
         request.setSystemProperties(System.getProperties());
+        // Without a ModelResolver the builder NPE's the moment it has to
+        // walk a remote <parent> POM (e.g. spring-boot-dependencies) or
+        // resolve a <dependencyManagement> import. BromoModelResolver
+        // fronts the same Aether RepositorySystem we use for the main
+        // classpath resolution below.
+        request.setModelResolver(new BromoModelResolver(session, system, remotes));
         try {
             ModelBuildingResult result = builder.build(request);
             return result.getEffectiveModel();
@@ -152,21 +162,36 @@ public final class MavenResolverProvider implements ProjectModelProvider {
         }
         collect.setRepositories(remotes);
 
+        // Partial-failure tolerance: a project that uses private deps from a
+        // Nexus/Artifactory not in settings.xml will throw
+        // DependencyResolutionException, but the exception still carries a
+        // partially-resolved result. Surface that — the LSP is more useful
+        // with 80% of the classpath wired than with nothing wired at all.
+        // Fully-failed resolutions (no artifacts at all) still throw.
+        var request = new DependencyRequest(collect, null);
+        org.eclipse.aether.resolution.DependencyResult result;
         try {
-            var result = system.resolveDependencies(session, new DependencyRequest(collect, null));
-            List<ClasspathEntry> classpath = new ArrayList<>();
-            for (ArtifactResult ar : result.getArtifactResults()) {
-                File f = ar.getArtifact().getFile();
-                if (f != null) {
-                    Path binary = f.toPath();
-                    classpath.add(new ClasspathEntry(binary, siblingSourcesJar(binary)));
-                }
-            }
-            return List.copyOf(classpath);
+            result = system.resolveDependencies(session, request);
         } catch (DependencyResolutionException e) {
-            throw new IOException("dependency resolution failed for "
-                    + model.getGroupId() + ":" + model.getArtifactId(), e);
+            result = e.getResult();
+            if (result == null) {
+                throw new IOException("dependency resolution failed for "
+                        + model.getGroupId() + ":" + model.getArtifactId(), e);
+            }
+            System.getLogger(MavenResolverProvider.class.getName()).log(
+                    System.Logger.Level.WARNING,
+                    () -> "partial dependency resolution: " + e.getMessage());
         }
+        List<ClasspathEntry> classpath = new ArrayList<>();
+        for (ArtifactResult ar : result.getArtifactResults()) {
+            if (!ar.isResolved()) continue;
+            File f = ar.getArtifact().getFile();
+            if (f != null) {
+                Path binary = f.toPath();
+                classpath.add(new ClasspathEntry(binary, siblingSourcesJar(binary)));
+            }
+        }
+        return List.copyOf(classpath);
     }
 
     private static Optional<Path> siblingSourcesJar(Path binary) {

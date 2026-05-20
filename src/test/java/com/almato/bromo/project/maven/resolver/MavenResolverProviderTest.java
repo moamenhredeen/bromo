@@ -93,6 +93,34 @@ final class MavenResolverProviderTest {
         assertContains(jarNames, "gson-");
     }
 
+    @Test
+    @DisplayName("loads a POM whose parent must be resolved through ModelResolver")
+    void loadsPomWithRemoteParent(@TempDir Path tmp) throws Exception {
+        // junit-bom 5.11.4 is already in ~/.m2 because bromo's own build pulls
+        // it via the junit-jupiter test dep. The child POM has no
+        // <relativePath>, so the model builder is forced to ask the
+        // ModelResolver — which is the path that NPE'd before BromoModelResolver
+        // landed.
+        Path pom = tmp.resolve("pom.xml");
+        Files.writeString(pom, """
+                <project xmlns="http://maven.apache.org/POM/4.0.0">
+                  <modelVersion>4.0.0</modelVersion>
+                  <parent>
+                    <groupId>org.junit</groupId>
+                    <artifactId>junit-bom</artifactId>
+                    <version>5.11.4</version>
+                  </parent>
+                  <groupId>com.example</groupId>
+                  <artifactId>remote-parent-child</artifactId>
+                  <version>1.0</version>
+                </project>
+                """);
+
+        var model = (MavenProjectModel) new MavenResolverProvider().load(tmp);
+        assertEquals("com.example", model.groupId());
+        assertEquals("remote-parent-child", model.artifactId());
+    }
+
     private static void assertContains(java.util.List<String> jarNames, String prefix) {
         assertTrue(jarNames.stream().anyMatch(n -> n.startsWith(prefix)),
                 "expected a jar starting with '" + prefix + "' in classpath, but had: " + jarNames);
