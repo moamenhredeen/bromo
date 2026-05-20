@@ -45,11 +45,15 @@ public final class QueryEngine implements AutoCloseable {
         files.addChangeListener(invalidator);
     }
 
-    /// Returns the binding-resolved AST for [uri] if it is an open document.
-    /// Cache-hit on revision match; cache-miss re-parses through ECJ.
+    /// Returns the binding-resolved AST + the source `char[]` it was parsed
+    /// from. Cache-hit on revision match; cache-miss re-parses through ECJ.
     /// Empty when [uri] is not currently open — caller falls through to the
     /// cold path (read-then-parse).
-    public Optional<CompilationUnit> cachedParsedAst(URI uri) {
+    ///
+    /// Returning the source alongside the AST is what lets the hot path skip
+    /// a second `text().toCharArray()` materialization. Hover/definition need
+    /// the source array to slice javadoc out of AST node ranges.
+    public Optional<AstSnapshot> cachedSnapshot(URI uri) {
         Document doc = files.getOpen(uri).orElse(null);
         if (doc == null) return Optional.empty();
         long rev = doc.revision().value();
@@ -57,10 +61,23 @@ public final class QueryEngine implements AutoCloseable {
         AstEntry entry = astCache.compute(uri, (key, existing) -> {
             if (existing != null && existing.revision == rev) return existing;
             char[] content = doc.text().toCharArray();
-            return new AstEntry(rev, ecj.parseWithBindings(key, content));
+            return new AstEntry(rev, content, ecj.parseWithBindings(key, content));
         });
-        return Optional.of(entry.ast);
+        return Optional.of(new AstSnapshot(entry.ast, entry.source));
     }
+
+    /// Returns just the binding-resolved AST for [uri] if it is an open
+    /// document. Convenience over [#cachedSnapshot] for callers that don't
+    /// need the source array.
+    public Optional<CompilationUnit> cachedParsedAst(URI uri) {
+        return cachedSnapshot(uri).map(AstSnapshot::ast);
+    }
+
+    /// A cached parse together with the source it was parsed from.
+    /// Sharing the array is safe because both fields are written once at
+    /// cache-miss time and never mutated thereafter — `char[]` is treated
+    /// as immutable for the lifetime of this entry.
+    public record AstSnapshot(CompilationUnit ast, char[] source) {}
 
     /// Drop the cached entry for [uri]. Called from the [FileStore] change
     /// listener — also exposed for tests and explicit invalidation.
@@ -79,5 +96,5 @@ public final class QueryEngine implements AutoCloseable {
         astCache.clear();
     }
 
-    private record AstEntry(long revision, CompilationUnit ast) {}
+    private record AstEntry(long revision, char[] source, CompilationUnit ast) {}
 }

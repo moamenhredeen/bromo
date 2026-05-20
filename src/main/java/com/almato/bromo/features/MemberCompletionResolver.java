@@ -82,13 +82,17 @@ public final class MemberCompletionResolver {
         }
         String partial = content.subSequence(prefixStart, offset).toString();
 
-        String modified = new StringBuilder(content.length() + SENTINEL.length())
-                .append(content, 0, offset)
-                .append(SENTINEL)
-                .append(content, offset, content.length())
-                .toString();
+        // Sentinel-reparse builds the synthetic source directly into a
+        // char[] — going through StringBuilder + toString + toCharArray
+        // doubled the allocation on the keystroke path.
+        int prefixLen = offset;
+        int suffixLen = content.length() - offset;
+        char[] modified = new char[prefixLen + SENTINEL.length() + suffixLen];
+        copyCharSequence(content, 0, prefixLen, modified, 0);
+        SENTINEL.getChars(0, SENTINEL.length(), modified, prefixLen);
+        copyCharSequence(content, offset, content.length(), modified, prefixLen + SENTINEL.length());
 
-        CompilationUnit cu = ecj.parseWithBindings(uri, modified.toCharArray());
+        CompilationUnit cu = ecj.parseWithBindings(uri, modified);
         if (cu == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
@@ -196,6 +200,23 @@ public final class MemberCompletionResolver {
         if (superCls != null) collectMembers(superCls, prefix, wantStatic, out, visitedKeys);
         for (ITypeBinding iface : type.getInterfaces()) {
             collectMembers(iface, prefix, wantStatic, out, visitedKeys);
+        }
+    }
+
+    /// Copies `[from, to)` from [src] into [dst] at [dstStart] without going
+    /// through `subSequence` or `toString` — both of which allocate. Uses the
+    /// fast path for `String` sources via `getChars`.
+    private static void copyCharSequence(CharSequence src, int from, int to, char[] dst, int dstStart) {
+        if (src instanceof String s) {
+            s.getChars(from, to, dst, dstStart);
+            return;
+        }
+        if (src instanceof StringBuilder sb) {
+            sb.getChars(from, to, dst, dstStart);
+            return;
+        }
+        for (int i = from, j = dstStart; i < to; i++, j++) {
+            dst[j] = src.charAt(i);
         }
     }
 

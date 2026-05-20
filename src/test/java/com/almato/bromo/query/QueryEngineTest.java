@@ -118,6 +118,27 @@ final class QueryEngineTest {
         }
     }
 
+    @Test
+    @DisplayName("cachedSnapshot returns the source char[] alongside the AST and stays consistent across calls")
+    void cachedSnapshotReturnsSourceWithAst(@TempDir Path tmp) throws IOException {
+        Path src = mkdirs(tmp.resolve("src/main/java/ex"));
+        Path file = src.resolve("Foo.java");
+        String text = "package ex; public class Foo {}";
+        Files.writeString(file, text, StandardCharsets.UTF_8);
+
+        var fs = new FileStore();
+        try (var ecj = new EcjContext(fs, List.of(tmp.resolve("src/main/java")), List.of());
+             var qe = new QueryEngine(fs, ecj)) {
+            URI uri = file.toUri();
+            fs.openDocument(uri, "java", text);
+            var first = qe.cachedSnapshot(uri).orElseThrow();
+            var second = qe.cachedSnapshot(uri).orElseThrow();
+            assertSame(first.ast(), second.ast(), "cache hit must reuse the AST");
+            assertSame(first.source(), second.source(), "cache hit must reuse the source array");
+            assertTrue(new String(first.source()).equals(text), "source must round-trip the document text");
+        }
+    }
+
     private static Path mkdirs(Path p) throws IOException {
         Files.createDirectories(p);
         return p;

@@ -66,11 +66,23 @@ public final class DefinitionFeature {
     }
 
     public Optional<DefinitionResult> definition(URI uri, int offset, CancelToken cancel) {
-        char[] content = readContent(uri).orElse(null);
-        if (content == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
-        CompilationUnit cu = parsedAst(uri, content);
+        CompilationUnit cu;
+        if (queries != null) {
+            var hit = queries.cachedParsedAst(uri);
+            if (hit.isPresent()) {
+                cu = hit.get();
+            } else {
+                char[] content = readContent(uri).orElse(null);
+                if (content == null) return Optional.empty();
+                cu = ecj.parseWithBindings(uri, content);
+            }
+        } else {
+            char[] content = readContent(uri).orElse(null);
+            if (content == null) return Optional.empty();
+            cu = ecj.parseWithBindings(uri, content);
+        }
         if (cu == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
@@ -129,14 +141,6 @@ public final class DefinitionFeature {
             }
         }
         return Optional.empty();
-    }
-
-    private CompilationUnit parsedAst(URI uri, char[] content) {
-        if (queries != null) {
-            var hit = queries.cachedParsedAst(uri);
-            if (hit.isPresent()) return hit.get();
-        }
-        return ecj.parseWithBindings(uri, content);
     }
 
     private Optional<char[]> readContent(URI uri) {

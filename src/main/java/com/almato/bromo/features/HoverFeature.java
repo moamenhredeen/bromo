@@ -63,13 +63,13 @@ public final class HoverFeature {
     }
 
     public Optional<HoverResult> hover(URI uri, int offset, CancelToken cancel) {
-        char[] content = readContent(uri).orElse(null);
-        if (content == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
 
-        CompilationUnit cu = parsedAst(uri, content);
-        if (cu == null) return Optional.empty();
+        var loaded = load(uri).orElse(null);
+        if (loaded == null) return Optional.empty();
         if (cancel.isCancelled()) return Optional.empty();
+        CompilationUnit cu = loaded.ast;
+        char[] content = loaded.source;
 
         ASTNode node = NodeFinder.perform(cu, offset, 0);
         if (node == null) return Optional.empty();
@@ -137,11 +137,10 @@ public final class HoverFeature {
         if (typeEntry == null) return "";
 
         URI declaringUri = typeEntry.source().toUri();
-        char[] declaringContent = readContent(declaringUri).orElse(null);
-        if (declaringContent == null) return "";
-
-        CompilationUnit declaringCu = parsedAst(declaringUri, declaringContent);
-        if (declaringCu == null) return "";
+        var declaringLoaded = load(declaringUri).orElse(null);
+        if (declaringLoaded == null) return "";
+        CompilationUnit declaringCu = declaringLoaded.ast;
+        char[] declaringContent = declaringLoaded.source;
 
         BodyDeclaration target = findTargetBody(declaringCu, binding, simpleName);
         if (target == null || target.getJavadoc() == null) return "";
@@ -219,15 +218,23 @@ public final class HoverFeature {
         return null;
     }
 
-    /// Returns a binding-resolved AST, using the [QueryEngine] cache for open
-    /// documents and falling through to a direct ECJ parse for closed files.
-    private CompilationUnit parsedAst(URI uri, char[] content) {
+    /// Returns the binding-resolved AST + the source it was parsed from,
+    /// preferring the [QueryEngine] cache for open documents. On cache hit
+    /// the source array is reused (no fresh `text().toCharArray()` allocation),
+    /// which is the dominant per-hover allocation we can avoid.
+    private Optional<Loaded> load(URI uri) {
         if (queries != null) {
-            var hit = queries.cachedParsedAst(uri);
-            if (hit.isPresent()) return hit.get();
+            var snap = queries.cachedSnapshot(uri);
+            if (snap.isPresent()) return Optional.of(new Loaded(snap.get().ast(), snap.get().source()));
         }
-        return ecj.parseWithBindings(uri, content);
+        char[] content = readContent(uri).orElse(null);
+        if (content == null) return Optional.empty();
+        CompilationUnit cu = ecj.parseWithBindings(uri, content);
+        if (cu == null) return Optional.empty();
+        return Optional.of(new Loaded(cu, content));
     }
+
+    private record Loaded(CompilationUnit ast, char[] source) {}
 
     private Optional<char[]> readContent(URI uri) {
         var open = files.getOpen(uri);
@@ -389,21 +396,36 @@ public final class HoverFeature {
 
     /// Strips `/** */`, leading `*`, and `///` markers; returns the markdown
     /// body. Multi-line javadoc is preserved as-is so JEP 467 markdown comes
-    /// through cleanly.
+    /// through cleanly. Manual line scan instead of `split("\\R")` — regex on
+    /// the keystroke path is banned by CLAUDE.md and the matcher allocation
+    /// dominated the per-hover cost of this routine.
     private static String stripJavadocDelimiters(String raw) {
-        var out = new StringBuilder();
-        for (String line : raw.split("\\R")) {
-            String trimmed = line.strip();
-            if (trimmed.equals("/**") || trimmed.equals("*/")) continue;
-            if (trimmed.startsWith("/**")) trimmed = trimmed.substring(3);
-            if (trimmed.endsWith("*/"))    trimmed = trimmed.substring(0, trimmed.length() - 2);
-            trimmed = trimmed.strip();
-            if (trimmed.startsWith("* "))  trimmed = trimmed.substring(2);
-            else if (trimmed.equals("*"))  trimmed = "";
-            else if (trimmed.startsWith("/// ")) trimmed = trimmed.substring(4);
-            else if (trimmed.startsWith("///"))  trimmed = trimmed.substring(3);
-            out.append(trimmed).append('\n');
+        var out = new StringBuilder(raw.length());
+        int len = raw.length();
+        int lineStart = 0;
+        for (int i = 0; i <= len; i++) {
+            boolean atEnd = i == len;
+            char c = atEnd ? '\n' : raw.charAt(i);
+            if (!atEnd && c != '\n' && c != '\r') continue;
+
+            appendStrippedLine(raw.substring(lineStart, i), out);
+
+            if (c == '\r' && i + 1 < len && raw.charAt(i + 1) == '\n') i++;
+            lineStart = i + 1;
         }
         return out.toString().strip();
+    }
+
+    private static void appendStrippedLine(String line, StringBuilder out) {
+        String trimmed = line.strip();
+        if (trimmed.equals("/**") || trimmed.equals("*/")) return;
+        if (trimmed.startsWith("/**")) trimmed = trimmed.substring(3);
+        if (trimmed.endsWith("*/"))    trimmed = trimmed.substring(0, trimmed.length() - 2);
+        trimmed = trimmed.strip();
+        if (trimmed.startsWith("* "))        trimmed = trimmed.substring(2);
+        else if (trimmed.equals("*"))        trimmed = "";
+        else if (trimmed.startsWith("/// ")) trimmed = trimmed.substring(4);
+        else if (trimmed.startsWith("///"))  trimmed = trimmed.substring(3);
+        out.append(trimmed).append('\n');
     }
 }
