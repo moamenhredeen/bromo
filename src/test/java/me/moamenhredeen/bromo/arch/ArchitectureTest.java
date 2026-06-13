@@ -16,10 +16,10 @@ import org.junit.jupiter.api.Test;
 /// Build-failing enforcement of the hard architectural rules from CLAUDE.md.
 ///
 /// Each rule names the *allowed* path prefixes; everything else under
-/// `src/main/java/me.moamenhredeen/bromo` must be free of the banned import.
+/// `src/main/java/me/moamenhredeen/bromo` must be free of the banned import.
 final class ArchitectureTest {
 
-    private static final Path SRC_MAIN = Path.of("src/main/java/me.moamenhredeen/bromo");
+    private static final Path SRC_MAIN = Path.of("src/main/java/me/moamenhredeen/bromo");
 
     @Test
     @DisplayName("LSP4J imports stay inside lsp/ and wire/")
