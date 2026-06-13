@@ -1,0 +1,31 @@
+package me.moamenhredeen.bromo.project.maven;
+
+import me.moamenhredeen.bromo.project.ClasspathEntry;
+import me.moamenhredeen.bromo.project.ProjectModel;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
+
+/// Maven flavor of [ProjectModel].
+///
+/// Produced by either:
+/// - v0: [me.moamenhredeen.bromo.project.maven.resolver.MavenResolverProvider]
+/// - v0.1+ (R1 trigger): a hand-rolled `pom.xml` parser
+///
+/// Both produce the same record so consumers don't care which loader ran.
+public record MavenProjectModel(
+        Path root,
+        List<Path> sourceRoots,
+        List<ClasspathEntry> classpath,
+        Optional<String> javaRelease,
+        List<String> compilerArgs,
+        String groupId,
+        String artifactId,
+        String version
+) implements ProjectModel {
+
+    @Override
+    public String name() {
+        return groupId + ":" + artifactId + ":" + version;
+    }
+}

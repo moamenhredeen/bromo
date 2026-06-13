@@ -4,7 +4,7 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
-    <groupId>com.almato</groupId>
+    <groupId>me.moamen</groupId>
     <artifactId>bromo</artifactId>
     <version>0.0.1-SNAPSHOT</version>
     <packaging>jar</packaging>
@@ -168,7 +168,7 @@
                 <artifactId>exec-maven-plugin</artifactId>
                 <version>${exec-maven-plugin.version}</version>
                 <configuration>
-                    <mainClass>com.almato.bromo.Main</mainClass>
+                    <mainClass>me.moamenhredeen.bromo.Main</mainClass>
                     <commandlineArgs>--stdio</commandlineArgs>
                 </configuration>
             </plugin>
@@ -190,7 +190,7 @@
                             <transformers>
                                 <transformer
                                     implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                    <mainClass>com.almato.bromo.Main</mainClass>
+                                    <mainClass>me.moamenhredeen.bromo.Main</mainClass>
                                 </transformer>
                                 <transformer
                                     implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>

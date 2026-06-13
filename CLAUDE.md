@@ -52,11 +52,11 @@ public IBinding bindingAt(URI uri, int offset, CancelToken cancel) { ... }
 
 JPMS is used where it provides isolation that matters. Current target (may evolve as code lands):
 
-- `com.almato.bromo.foundation` — `util`, `workspace`, `query`, `symbol`. No compiler deps.
-- `com.almato.bromo.engine` — `compiler`, `features`. Depends on `foundation` + ECJ.
-- `com.almato.bromo.transport` — `wire`, `lsp`. Depends on `engine` + (v0) LSP4J.
-- `com.almato.bromo.project.maven.resolver` — Maven Resolver provider (v0). Depends on `foundation` + Maven Resolver.
-- `com.almato.bromo.app` — `Main`, bootstrap, glue. Depends on everything.
+- `me.moamenhredeen.bromo.foundation` — `util`, `workspace`, `query`, `symbol`. No compiler deps.
+- `me.moamenhredeen.bromo.engine` — `compiler`, `features`. Depends on `foundation` + ECJ.
+- `me.moamenhredeen.bromo.transport` — `wire`, `lsp`. Depends on `engine` + (v0) LSP4J.
+- `me.moamenhredeen.bromo.project.maven.resolver` — Maven Resolver provider (v0). Depends on `foundation` + Maven Resolver.
+- `me.moamenhredeen.bromo.app` — `Main`, bootstrap, glue. Depends on everything.
 
 Notes:
 - ECJ, LSP4J, and Maven Resolver may be **automatic modules**. Tolerated for now; pin module names where used in `requires`.
